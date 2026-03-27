@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.0.3 - 2026-03-27
+
+### Improvements
+- **Documentation**: Updated README with latest API changes and usage examples
+- **Documentation**: Added CHANGELOG.md for release tracking
+- **Release**: Prepared for v0.0.3 official release
+
 ## v0.0.2 - 2026-03-27
 
 ### Breaking Changes
