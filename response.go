@@ -46,8 +46,11 @@ func (r *Response) IsSuccess() bool {
 	return code >= 200 && code < 300
 }
 
-// IsError returns true if status code is 4xx or 5xx
+// IsError returns true if status code is 4xx or 5xx, or any request error occurred
 func (r *Response) IsError() bool {
+	if r.err != nil {
+		return true
+	}
 	code := r.StatusCode()
 	return code >= 400 && code < 600
 }
