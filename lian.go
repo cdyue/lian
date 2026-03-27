@@ -12,7 +12,7 @@ import (
 var defaultRequest = NewRequest()
 
 // Global trace enable flag
-var enableTraceGlobal = true
+var enableTraceGlobal = false
 
 // SetTimeout sets the default timeout for all requests
 func SetTimeout(timeout time.Duration) {

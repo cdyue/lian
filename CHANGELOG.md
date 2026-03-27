@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.0.4 - 2026-03-27
+
+### Breaking Changes
+- **Default State**: Both OpenTelemetry tracing and HTTP console trace are now disabled by default
+- **Default State**: Users need to explicitly enable tracing via global switches or per-request methods
+
+### Improvements
+- **Performance**: Disabled tracing by default to avoid any unnecessary performance overhead for users who don't need tracing features
+
 ## v0.0.3 - 2026-03-27
 
 ### Improvements
