@@ -30,25 +30,25 @@ go get github.com/cdyue/lian
 package main
 
 import (
-	"context"
-	"fmt"
-	"github.com/cdyue/lian"
+ "context"
+ "fmt"
+ "github.com/cdyue/lian"
 )
 
 func main() {
-	// Simple GET request
-	resp := lian.Get("https://jsonplaceholder.typicode.com/posts/1")
-	if resp.IsError() {
-		panic(resp.Error())
-	}
+ // Simple GET request
+ resp := lian.Get("https://jsonplaceholder.typicode.com/posts/1")
+ if resp.IsError() {
+  panic(resp.Error())
+ }
 
-	// Parse JSON response
-	var post map[string]interface{}
-	if err := resp.JSON(&post); err != nil {
-		panic(err)
-	}
+ // Parse JSON response
+ var post map[string]interface{}
+ if err := resp.JSON(&post); err != nil {
+  panic(err)
+ }
 
-	fmt.Printf("Post Title: %s\n", post["title"])
+ fmt.Printf("Post Title: %s\n", post["title"])
 }
 ```
 
@@ -56,17 +56,17 @@ func main() {
 
 ```go
 user := map[string]interface{}{
-	"name":  "John Doe",
-	"email": "john@example.com",
+ "name":  "John Doe",
+ "email": "john@example.com",
 }
 
 resp := lian.NewRequest().
-	SetJSONBody(user).
-	SetBearerToken("your-auth-token").
-	Post("https://api.example.com/users")
+ SetJSONBody(user).
+ SetBearerToken("your-auth-token").
+ Post("https://api.example.com/users")
 
 if resp.IsSuccess() {
-	fmt.Println("User created successfully!")
+ fmt.Println("User created successfully!")
 }
 ```
 
@@ -79,9 +79,9 @@ import "time"
 
 // Create a custom HTTP client with specific settings
 client := lian.NewClient(
-	lian.WithTimeout(10 * time.Second),
-	lian.WithInsecure(), // Skip TLS certificate verification (use carefully!)
-	lian.WithMaxIdleConns(200),
+ lian.WithTimeout(10 * time.Second),
+ lian.WithInsecure(), // Skip TLS certificate verification (use carefully!)
+ lian.WithMaxIdleConns(200),
 )
 
 // Use the custom client for requests
@@ -94,6 +94,7 @@ resp := req.Get("https://api.example.com/data")
 Lian provides flexible configuration for core headers like authentication, tenant ID, etc.
 
 #### Global Configuration (applies to all requests)
+
 ```go
 // Customize header names globally
 lian.SetDefaultAuthHeaderName("X-Access-Token")
@@ -102,27 +103,28 @@ lian.SetDefaultUserIDHeaderName("X-Current-User-ID")
 
 // Custom value extractor functions (for integrating with your existing context)
 lian.SetDefaultTenantIDExtractor(func(ctx context.Context) string {
-	// Example: Extract tenant ID from Gin context
-	if ginCtx, ok := ctx.Value("gin.Context").(*gin.Context); ok {
-		return ginCtx.GetString("tenant_id")
-	}
-	return ""
+ // Example: Extract tenant ID from Gin context
+ if ginCtx, ok := ctx.Value("gin.Context").(*gin.Context); ok {
+  return ginCtx.GetString("tenant_id")
+ }
+ return ""
 })
 ```
 
 #### Per-Request Configuration
+
 ```go
 // Customize headers for a specific request
 customMapping := lian.HeaderMapping{
-	AuthHeader:     "X-API-Key",
-	TenantIDHeader: "X-Company-ID",
-	// Leave other fields empty to disable extraction
+ AuthHeader:     "X-API-Key",
+ TenantIDHeader: "X-Company-ID",
+ // Leave other fields empty to disable extraction
 }
 
 req := lian.NewRequest().
-	SetHeaderMapping(customMapping).
-	FromContext(ctx).
-	Get("https://api.example.com/data")
+ SetHeaderMapping(customMapping).
+ FromContext(ctx).
+ Get("https://api.example.com/data")
 ```
 
 ### Context Header Propagation
@@ -135,27 +137,27 @@ ctx = lian.SetHeaderToContext(ctx, "X-Tenant-Id", "acme-corp")
 
 // Later when making requests, headers are automatically extracted
 resp := lian.NewRequest().
-	FromContext(ctx).
-	Get("https://api.example.com/protected")
+ FromContext(ctx).
+ Get("https://api.example.com/protected")
 ```
 
 ### Logging Configuration
 
 ```go
 import (
-	"log/slog"
-	"os"
+ "log/slog"
+ "os"
 )
 
 // Use a custom slog instance
 logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-	Level: slog.LevelDebug,
+ Level: slog.LevelDebug,
 }))
 lian.SetLogger(logger)
 
 // Or implement the Logger interface for full customization
 type CustomLogger struct {
-	// Your logger implementation
+ // Your logger implementation
 }
 
 func (l *CustomLogger) Info(msg string, args ...interface{})  { /* ... */ }
@@ -171,36 +173,61 @@ lian.SetLogger(&CustomLogger{})
 ```go
 // Enable request/response dumping
 req := lian.NewRequest().
-	EnableDumpRequest().  // Log full request details
-	EnableDumpResponse(). // Log full response details
-	EnableTrace().        // Log HTTP connection details (DNS, TCP, TLS, etc.)
-	Get("https://api.example.com/debug")
+ EnableDumpRequest().  // Log full request details
+ EnableDumpResponse(). // Log full response details
+ EnableHTTPTrace().    // Log HTTP connection details (DNS, TCP, TLS, etc.)
+ Get("https://api.example.com/debug")
 ```
 
 ### OpenTelemetry Tracing
 
-Lian supports optional OpenTelemetry distributed tracing. Enable it by building with the `otel` tag:
+Lian has built-in OpenTelemetry distributed tracing support (enabled by default, no additional build tags required).
 
-```bash
-GOEXPERIMENT=jsonv2 go build -tags=otel ./...
+#### Global Control
+
+```go
+// Disable OpenTelemetry tracing globally for all requests
+lian.DisableOtelTrace()
+
+// Re-enable OpenTelemetry tracing globally
+lian.EnableOtelTrace()
 ```
 
-When enabled, Lian automatically creates client spans, propagates trace headers, and records all HTTP events to your OpenTelemetry collector.
+#### Per-Request Control
+
+```go
+// Disable tracing for a specific request
+req := lian.NewRequest().
+ DisableOtelTrace().
+ Get("https://api.example.com/debug")
+
+// Force enable tracing for a specific request even when globally disabled
+req := lian.NewRequest().
+ EnableOtelTraceForRequest().
+ Get("https://api.example.com/debug")
+```
+
+Lian automatically creates client spans, propagates trace headers, and records all HTTP events to your OpenTelemetry collector when tracing is enabled.
 
 ## 🔧 Compilation Notes
 
 ### Using Standard JSON (stable)
+
 To use the stable standard library `encoding/json`, modify the imports in:
+
 - `response.go`: Change `encoding/json/v2` to `encoding/json`
 - `body.go`: Change `encoding/json/v2` to `encoding/json`
 
 Then build normally:
+
 ```bash
 go build ./...
 ```
 
 ### Using JSON v2 (experimental, higher performance)
+
 Build with the JSON v2 experiment enabled:
+
 ```bash
 GOEXPERIMENT=jsonv2 go build ./...
 ```
@@ -208,6 +235,7 @@ GOEXPERIMENT=jsonv2 go build ./...
 ## 📖 API Reference
 
 ### Core Methods
+
 - `lian.Get(url string) *Response`
 - `lian.Post(url string) *Response`
 - `lian.Put(url string) *Response`
@@ -216,6 +244,7 @@ GOEXPERIMENT=jsonv2 go build ./...
 - `lian.Do(method, url string, body interface{}, headers map[string]string) *Response`
 
 ### Request Configuration
+
 - `SetHeader(key, value string) *Request`
 - `SetQueryParam(key, value string) *Request`
 - `SetJSONBody(v interface{}) *Request`
@@ -226,6 +255,7 @@ GOEXPERIMENT=jsonv2 go build ./...
 - `FromContext(ctx context.Context) *Request`
 
 ### Response Methods
+
 - `resp.StatusCode() int`
 - `resp.IsSuccess() bool`
 - `resp.IsError() bool`

@@ -1,6 +1,3 @@
-//go:build otel
-// +build otel
-
 package lian
 
 import (

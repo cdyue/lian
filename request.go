@@ -42,19 +42,20 @@ type Request struct {
 	headerMapping HeaderMapping // Custom core header names and extraction methods
 
 	// Configuration flags
-	timeout                time.Duration
-	dumpRequest            bool
-	dumpResponse           bool
-	enableTrace            bool
-	disableCompression     bool
-	compressRequest        bool
-	disableTracePropagation bool   // Disable trace header propagation
-	disableForwardedFor    bool   // Disable X-Forwarded-For header injection
-	disableAutoUnmarshal   bool   // Disable automatic response unmarshaling, return raw body directly
-	markAsAsync            bool   // Mark as async request, span kind will be Producer
-	result                 interface{} // Automatically unmarshal success response to this object
-	errorResult            interface{} // Automatically unmarshal error response to this object
-	errorStatusCodes       []int  // Custom list of error status codes
+	timeout                 time.Duration
+	dumpRequest             bool
+	dumpResponse            bool
+	enableHTTPTrace         bool // Enable HTTP trace logging to console
+	disableCompression      bool
+	compressRequest         bool
+	disableTrace            bool        // Disable OpenTelemetry tracing for this request
+	disableTracePropagation bool        // Disable trace header propagation
+	disableForwardedFor     bool        // Disable X-Forwarded-For header injection
+	disableAutoUnmarshal    bool        // Disable automatic response unmarshaling, return raw body directly
+	markAsAsync             bool        // Mark as async request, span kind will be Producer
+	result                  interface{} // Automatically unmarshal success response to this object
+	errorResult             interface{} // Automatically unmarshal error response to this object
+	errorStatusCodes        []int       // Custom list of error status codes
 }
 
 // slogLogger wraps slog as default logger implementation
@@ -78,7 +79,7 @@ func (l *slogLogger) Error(msg string, args ...interface{}) {
 	l.logger.Error(msg, args...)
 }
 
-// 全局默认logger
+// Global default logger
 var defaultLogger Logger = &slogLogger{logger: slog.Default()}
 
 // NewRequest creates a new HTTP request with default settings
@@ -434,9 +435,21 @@ func (r *Request) EnableDumpResponse() *Request {
 	return r
 }
 
-// EnableTrace enables HTTP trace logging
-func (r *Request) EnableTrace() *Request {
-	r.enableTrace = true
+// EnableHTTPTrace enables HTTP trace logging to console
+func (r *Request) EnableHTTPTrace() *Request {
+	r.enableHTTPTrace = true
+	return r
+}
+
+// DisableOtelTrace disables OpenTelemetry tracing for current request
+func (r *Request) DisableOtelTrace() *Request {
+	r.disableTrace = true
+	return r
+}
+
+// EnableOtelTraceForRequest enables OpenTelemetry tracing for current request (overrides global setting)
+func (r *Request) EnableOtelTraceForRequest() *Request {
+	r.disableTrace = false
 	return r
 }
 
@@ -602,7 +615,7 @@ func (r *Request) Send(ctx context.Context) *Response {
 		defer cancel()
 	}
 
-	// 验证result和errorResult必须是指针
+	// Validate that result and errorResult must be pointers
 	if r.result != nil && !isPointer(r.result) {
 		return NewResponse(nil, fmt.Errorf("result must be a pointer"))
 	}
@@ -615,23 +628,26 @@ func (r *Request) Send(ctx context.Context) *Response {
 		return NewResponse(nil, err)
 	}
 
-	// 注入X-Forwarded-For
+	// Inject X-Forwarded-For header
 	if !r.disableForwardedFor {
 		if ip, _, err := net.SplitHostPort(req.RemoteAddr); err == nil {
 			req.Header.Add("X-Forwarded-For", ip)
 		}
 	}
 
-	// 链路追踪（可选）
-	ctx, span := StartSpan(ctx, r.method, req.URL.Host, r.markAsAsync)
-	defer EndSpan(span)
+	// Distributed tracing (optional)
+	var span TraceContext
+	if !r.disableTrace {
+		ctx, span = StartSpan(ctx, r.method, req.URL.Host, r.markAsAsync)
+		defer EndSpan(span)
+	}
 
-	// 注入trace header
+	// Inject trace headers
 	if !r.disableTracePropagation {
 		InjectTraceHeaders(ctx, req.Header)
 	}
 
-	// 设置span属性
+	// Set span request attributes
 	SetSpanRequestAttributes(span, r.method, req.URL.String(), req.URL.Host, req.URL.Path)
 
 	if r.dumpRequest {
@@ -643,11 +659,11 @@ func (r *Request) Send(ctx context.Context) *Response {
 		}
 	}
 
-	if r.enableTrace {
-		// 创建OTel trace（如果启用）和控制台trace
+	if r.enableHTTPTrace {
+		// Create OTel trace (if enabled) and console trace
 		otelTrace := CreateClientTrace(span)
 
-		// 控制台打印trace
+		// Console trace logging
 		logger := r.logger
 		consoleTrace := &httptrace.ClientTrace{
 			GetConn: func(hostPort string) {
@@ -711,7 +727,7 @@ func (r *Request) Send(ctx context.Context) *Response {
 			},
 		}
 
-		// 合并trace
+		// Merge traces
 		var finalTrace *httptrace.ClientTrace
 		if otelTrace != nil {
 			finalTrace = mergeClientTraces(consoleTrace, otelTrace)
@@ -729,7 +745,7 @@ func (r *Request) Send(ctx context.Context) *Response {
 		return NewResponse(nil, err)
 	}
 
-	// 设置响应span属性
+	// Set span response attributes
 	SetSpanResponseAttributes(span, resp.StatusCode)
 
 	if r.dumpResponse {
@@ -743,7 +759,7 @@ func (r *Request) Send(ctx context.Context) *Response {
 
 	response := NewResponse(resp, nil)
 
-	// 自动解析响应
+	// Auto unmarshal response
 	if !r.disableAutoUnmarshal {
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 && r.result != nil {
 			if err := response.JSON(r.result); err != nil {
@@ -751,7 +767,7 @@ func (r *Request) Send(ctx context.Context) *Response {
 				return NewResponse(resp, fmt.Errorf("failed to unmarshal success response: %w", err))
 			}
 		} else {
-			// 检查是否是自定义错误状态码
+			// Check if it's a custom error status code
 			isError := false
 			if len(r.errorStatusCodes) > 0 {
 				for _, code := range r.errorStatusCodes {

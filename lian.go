@@ -11,6 +11,9 @@ import (
 // Global default request instance
 var defaultRequest = NewRequest()
 
+// Global trace enable flag
+var enableTraceGlobal = true
+
 // SetTimeout sets the default timeout for all requests
 func SetTimeout(timeout time.Duration) {
 	defaultRequest.SetTimeout(timeout)
@@ -125,6 +128,16 @@ func EnableDumpRequest() {
 // EnableDumpResponse enables response dumping for all requests
 func EnableDumpResponse() {
 	defaultRequest.EnableDumpResponse()
+}
+
+// EnableOtelTrace enables OpenTelemetry tracing globally for all requests
+func EnableOtelTrace() {
+	enableTraceGlobal = true
+}
+
+// DisableOtelTrace disables OpenTelemetry tracing globally for all requests
+func DisableOtelTrace() {
+	enableTraceGlobal = false
 }
 
 // Get makes a GET request using the default client
