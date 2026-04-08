@@ -69,6 +69,21 @@ func recordSpanError(spanCtx TraceContext, err error) {
 
 func addSpanEvent(spanCtx TraceContext, name string, attributes ...interface{}) {}
 
+func setSpanAttribute(spanCtx TraceContext, key string, value interface{}) {
+	if s, ok := spanCtx.(*otelSpan); ok {
+		switch v := value.(type) {
+		case string:
+			s.span.SetAttributes(attribute.String(key, v))
+		case int:
+			s.span.SetAttributes(attribute.Int(key, v))
+		case float64:
+			s.span.SetAttributes(attribute.Float64(key, v))
+		case bool:
+			s.span.SetAttributes(attribute.Bool(key, v))
+		}
+	}
+}
+
 func createClientTrace(spanCtx TraceContext) *httptrace.ClientTrace {
 	if s, ok := spanCtx.(*otelSpan); ok {
 		span := s.span

@@ -6,7 +6,8 @@ Lian is a high-performance, production-ready HTTP client library for Go, designe
 
 - **Fluent Chainable API**: Clean and readable method chaining for request configuration
 - **Automatic Compression**: Built-in support for gzip, brotli, zstd, and deflate decompression
-- **Request Compression**: Optional zstd compression for request bodies
+- **Request Compression**: Optional zstd compression for request bodies with dictionary support and instance pooling
+- **Automatic Retry**: Configurable automatic retry with exponential backoff and jitter for transient errors
 - **Structured Logging**: Uses standard library `slog` by default, supports custom logger implementations
 - **OpenTelemetry Support**: Optional built-in distributed tracing integration
 - **Context-Aware**: Full support for standard `context.Context` propagation
@@ -177,6 +178,67 @@ req := lian.NewRequest().
 	Get("https://api.example.com/debug")
 ```
 
+### Retry Configuration
+
+Lian supports automatic retry for transient errors with configurable exponential backoff and jitter.
+
+#### Client-level Retry (applies to all requests)
+```go
+import "time"
+import "github.com/klauspost/compress/zstd"
+
+// Create client with default retry configuration (3 retries)
+client := lian.NewClient(
+    lian.WithRetry(3),
+)
+
+// Create client with full custom retry configuration
+client := lian.NewClient(
+    lian.WithRetryConfig(
+        3,                  // max retries
+        100*time.Millisecond, // base interval
+        2.0,                // backoff factor
+        0.2,                // jitter factor (0-1)
+    ),
+    lian.WithRetryableStatuses(429, 500, 502, 503, 504), // custom retryable status codes
+)
+```
+
+#### Request-level Retry (overrides client configuration)
+```go
+// Enable retry for a specific request
+resp := lian.NewRequest().
+    SetRetry(2). // 2 retries for this request
+    SetRetryConfig(2, 50*time.Millisecond, 1.5, 0.1). // custom config
+    SetRetryableStatuses(429, 503). // custom status codes for this request
+    Get("https://api.example.com/data")
+```
+
+### Zstd Compression Configuration
+
+Lian provides enhanced zstd support with instance pooling and pre-trained dictionary support for improved performance and compression ratios.
+
+#### Client-level Zstd Configuration
+```go
+// Create client with custom zstd settings
+client := lian.NewClient(
+    lian.WithZstdCompressionLevel(int(zstd.BestSpeed)), // compression level
+    lian.WithZstdDictionary(myPreTrainedDictionary), // use pre-trained dictionary
+    lian.WithZstdPooling(true), // enable encoder/decoder pooling (default true)
+)
+```
+
+#### Request-level Zstd Configuration
+```go
+// Enable zstd compression with custom level and dictionary
+resp := lian.NewRequest().
+    EnableZstdCompressionWithLevel(int(zstd.BestCompression)).
+    SetZstdCompressionLevel(int(zstd.BestCompression)).
+    SetZstdDictionary(requestSpecificDict).
+    Post("https://api.example.com/upload").
+    SetJSONBody(largePayload)
+```
+
 ### OpenTelemetry Tracing
 
 Lian has built-in OpenTelemetry distributed tracing support (enabled by default, no additional build tags required).
@@ -233,6 +295,19 @@ GOEXPERIMENT=jsonv2 go build ./...
 - `lian.Patch(url string) *Response`
 - `lian.Do(method, url string, body interface{}, headers map[string]string) *Response`
 
+### Client Options
+- `WithRetry(maxRetries int) OpFunc` - Enable retry with default configuration
+- `WithRetryConfig(maxRetries int, interval time.Duration, backoffFactor float64, jitter float64) OpFunc` - Full retry configuration
+- `WithRetryableStatuses(statuses ...int) OpFunc` - Custom retryable HTTP status codes
+- `WithZstdCompressionLevel(level int) OpFunc` - Set zstd compression level
+- `WithZstdDictionary(dict []byte) OpFunc` - Set pre-trained zstd dictionary
+- `WithZstdPooling(enable bool) OpFunc` - Enable/disable zstd encoder/decoder pooling
+- `WithTimeout(d time.Duration) OpFunc` - Set overall request timeout
+- `WithInsecure() OpFunc` - Disable TLS certificate verification
+- `WithDisableCompression() OpFunc` - Disable response compression
+- `WithMaxIdleConns(n int) OpFunc` - Set maximum number of idle connections
+- `WithIdleConnTimeout(d time.Duration) OpFunc` - Set idle connection timeout
+
 ### Request Configuration
 - `SetHeader(key, value string) *Request`
 - `SetQueryParam(key, value string) *Request`
@@ -242,6 +317,13 @@ GOEXPERIMENT=jsonv2 go build ./...
 - `SetBearerToken(token string) *Request`
 - `SetBasicAuth(username, password string) *Request`
 - `FromContext(ctx context.Context) *Request`
+- `SetRetry(maxRetries int) *Request` - Enable retry for this request
+- `SetRetryConfig(maxRetries int, interval time.Duration, backoffFactor float64, jitter float64) *Request` - Set full retry configuration
+- `SetRetryableStatuses(statuses ...int) *Request` - Set custom retryable status codes
+- `EnableZstdCompression() *Request` - Enable zstd compression for request body
+- `EnableZstdCompressionWithLevel(level int) *Request` - Enable zstd compression with custom level
+- `SetZstdCompressionLevel(level int) *Request` - Set zstd compression level
+- `SetZstdDictionary(dict []byte) *Request` - Set pre-trained zstd dictionary for this request
 
 ### Response Methods
 - `resp.StatusCode() int`

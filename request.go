@@ -5,15 +5,20 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httptrace"
 	"net/http/httputil"
 	"net/url"
 	"reflect"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
@@ -56,6 +61,18 @@ type Request struct {
 	result                  interface{} // Automatically unmarshal success response to this object
 	errorResult             interface{} // Automatically unmarshal error response to this object
 	errorStatusCodes        []int       // Custom list of error status codes
+
+	// Retry configuration
+	maxRetries         int           // Maximum number of retries, 0 means no retries
+	retryInterval      time.Duration // Base retry interval
+	retryBackoffFactor float64       // Exponential backoff factor
+	retryJitter        float64       // Jitter factor (0-1)
+	retryableStatuses  []int         // HTTP status codes that should trigger a retry
+
+	// Zstd configuration
+	zstdCompressionLevel int    // Zstd compression level
+	zstdDictionary       []byte // Pre-trained zstd dictionary
+	zstdEnablePooling    bool   // Enable zstd encoder/decoder pooling
 }
 
 // slogLogger wraps slog as default logger implementation
@@ -82,6 +99,35 @@ func (l *slogLogger) Error(msg string, args ...interface{}) {
 // Global default logger
 var defaultLogger Logger = &slogLogger{logger: slog.Default()}
 
+// Global zstd encoder pool
+var zstdEncoderPool = &sync.Pool{
+	New: func() interface{} {
+		encoder, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
+		return encoder
+	},
+}
+
+// GetZstdEncoder gets an encoder from the pool or creates a new one
+func GetZstdEncoder(w io.Writer, level int, dict []byte) (*zstd.Encoder, error) {
+	// If dictionary is provided, we can't use the pool
+	if dict != nil {
+		return zstd.NewWriter(w, zstd.WithEncoderLevel(zstd.EncoderLevel(level)), zstd.WithEncoderDict(dict))
+	}
+
+	encoder := zstdEncoderPool.Get().(*zstd.Encoder)
+	encoder.Reset(w)
+	return encoder, nil
+}
+
+// PutZstdEncoder returns an encoder to the pool
+func PutZstdEncoder(encoder *zstd.Encoder) {
+	// Don't pool encoders with custom dictionaries
+	if encoder != nil {
+		encoder.Close()
+		zstdEncoderPool.Put(encoder)
+	}
+}
+
 // NewRequest creates a new HTTP request with default settings
 func NewRequest() *Request {
 	return &Request{
@@ -91,6 +137,15 @@ func NewRequest() *Request {
 		cookies:       make([]*http.Cookie, 0),
 		logger:        defaultLogger,
 		headerMapping: defaultHeaderMapping, // Use global default header configuration
+		// Retry defaults (same as client defaults
+		maxRetries:         0, // Disable by default for backward compatibility
+		retryInterval:      100 * time.Millisecond,
+		retryBackoffFactor: 2.0,
+		retryJitter:        0.2,
+		retryableStatuses:  []int{429, 500, 502, 503, 504},
+		// Zstd defaults
+		zstdCompressionLevel: int(zstd.SpeedDefault),
+		zstdEnablePooling:    true, // Enable pooling by default for better performance
 	}
 }
 
@@ -467,6 +522,47 @@ func (r *Request) EnableZstdCompression() *Request {
 	return r
 }
 
+// EnableZstdCompressionWithLevel enables zstd compression with custom level
+func (r *Request) EnableZstdCompressionWithLevel(level int) *Request {
+	r.compressRequest = true
+	r.zstdCompressionLevel = level
+	r.header.Set("Content-Encoding", "zstd")
+	return r
+}
+
+// SetZstdCompressionLevel sets the zstd compression level for this request
+func (r *Request) SetZstdCompressionLevel(level int) *Request {
+	r.zstdCompressionLevel = level
+	return r
+}
+
+// SetZstdDictionary sets the pre-trained zstd dictionary for this request
+func (r *Request) SetZstdDictionary(dict []byte) *Request {
+	r.zstdDictionary = dict
+	return r
+}
+
+// SetRetry enables retry for this request with specified max retries
+func (r *Request) SetRetry(maxRetries int) *Request {
+	r.maxRetries = maxRetries
+	return r
+}
+
+// SetRetryConfig sets full retry configuration for this request
+func (r *Request) SetRetryConfig(maxRetries int, interval time.Duration, backoffFactor float64, jitter float64) *Request {
+	r.maxRetries = maxRetries
+	r.retryInterval = interval
+	r.retryBackoffFactor = backoffFactor
+	r.retryJitter = jitter
+	return r
+}
+
+// SetRetryableStatuses sets custom retryable status codes for this request
+func (r *Request) SetRetryableStatuses(statuses ...int) *Request {
+	r.retryableStatuses = statuses
+	return r
+}
+
 // DisableTracePropagation disables trace header injection and propagation
 func (r *Request) DisableTracePropagation() *Request {
 	r.disableTracePropagation = true
@@ -607,25 +703,19 @@ func (r *Request) OptionsWithContext(ctx context.Context, url string) *Response 
 	return r.SetMethod(http.MethodOptions).SetURL(url).Send(ctx)
 }
 
-// Send executes the request
-func (r *Request) Send(ctx context.Context) *Response {
-	if r.timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, r.timeout)
-		defer cancel()
-	}
-
+// sendOnce executes the request once, used by the retry loop
+func (r *Request) sendOnce(ctx context.Context, attempt int) (*Response, error) {
 	// Validate that result and errorResult must be pointers
 	if r.result != nil && !isPointer(r.result) {
-		return NewResponse(nil, fmt.Errorf("result must be a pointer"))
+		return nil, fmt.Errorf("result must be a pointer")
 	}
 	if r.errorResult != nil && !isPointer(r.errorResult) {
-		return NewResponse(nil, fmt.Errorf("error result must be a pointer"))
+		return nil, fmt.Errorf("error result must be a pointer")
 	}
 
 	req, err := r.buildRequest(ctx)
 	if err != nil {
-		return NewResponse(nil, err)
+		return nil, err
 	}
 
 	// Inject X-Forwarded-For header
@@ -640,6 +730,12 @@ func (r *Request) Send(ctx context.Context) *Response {
 	if !r.disableTrace {
 		ctx, span = StartSpan(ctx, r.method, req.URL.Host, r.markAsAsync)
 		defer EndSpan(span)
+
+		// Add retry attributes to span
+		if attempt > 0 {
+			SetSpanAttribute(span, "retry.attempt", attempt)
+			SetSpanAttribute(span, "retry.max_attempts", r.maxRetries)
+		}
 	}
 
 	// Inject trace headers
@@ -653,9 +749,9 @@ func (r *Request) Send(ctx context.Context) *Response {
 	if r.dumpRequest {
 		dump, err := httputil.DumpRequestOut(req, true)
 		if err == nil {
-			r.logger.Debug("HTTP Request", "dump", string(dump))
+			r.logger.Debug("HTTP Request", "dump", string(dump), "attempt", attempt)
 		} else {
-			r.logger.Warn("Failed to dump request", "error", err)
+			r.logger.Warn("Failed to dump request", "error", err, "attempt", attempt)
 		}
 	}
 
@@ -667,63 +763,65 @@ func (r *Request) Send(ctx context.Context) *Response {
 		logger := r.logger
 		consoleTrace := &httptrace.ClientTrace{
 			GetConn: func(hostPort string) {
-				logger.Debug("HTTP Trace: Connecting", "host_port", hostPort)
+				logger.Debug("HTTP Trace: Connecting", "host_port", hostPort, "attempt", attempt)
 			},
 			GotConn: func(info httptrace.GotConnInfo) {
 				logger.Debug("HTTP Trace: Connected",
 					"remote_addr", info.Conn.RemoteAddr().String(),
 					"reused", info.Reused,
+					"attempt", attempt,
 				)
 			},
 			DNSStart: func(info httptrace.DNSStartInfo) {
-				logger.Debug("HTTP Trace: Resolving DNS", "host", info.Host)
+				logger.Debug("HTTP Trace: Resolving DNS", "host", info.Host, "attempt", attempt)
 			},
 			DNSDone: func(info httptrace.DNSDoneInfo) {
 				if info.Err != nil {
-					logger.Warn("HTTP Trace: DNS resolution failed", "error", info.Err)
+					logger.Warn("HTTP Trace: DNS resolution failed", "error", info.Err, "attempt", attempt)
 				} else {
 					addrs := make([]string, len(info.Addrs))
 					for i, addr := range info.Addrs {
 						addrs[i] = addr.String()
 					}
-					logger.Debug("HTTP Trace: DNS resolved", "addresses", addrs)
+					logger.Debug("HTTP Trace: DNS resolved", "addresses", addrs, "attempt", attempt)
 				}
 			},
 			ConnectStart: func(network, addr string) {
-				logger.Debug("HTTP Trace: Dialing", "network", network, "address", addr)
+				logger.Debug("HTTP Trace: Dialing", "network", network, "address", addr, "attempt", attempt)
 			},
 			ConnectDone: func(network, addr string, err error) {
 				if err != nil {
-					logger.Warn("HTTP Trace: Dial failed", "error", err)
+					logger.Warn("HTTP Trace: Dial failed", "error", err, "attempt", attempt)
 				} else {
-					logger.Debug("HTTP Trace: Connected", "network", network, "address", addr)
+					logger.Debug("HTTP Trace: Connected", "network", network, "address", addr, "attempt", attempt)
 				}
 			},
 			TLSHandshakeStart: func() {
-				logger.Debug("HTTP Trace: Starting TLS handshake")
+				logger.Debug("HTTP Trace: Starting TLS handshake", "attempt", attempt)
 			},
 			TLSHandshakeDone: func(state tls.ConnectionState, err error) {
 				if err != nil {
-					logger.Warn("HTTP Trace: TLS handshake failed", "error", err)
+					logger.Warn("HTTP Trace: TLS handshake failed", "error", err, "attempt", attempt)
 				} else {
 					logger.Debug("HTTP Trace: TLS handshake completed",
 						"tls_version", fmt.Sprintf("%x", state.Version),
 						"cipher_suite", tls.CipherSuiteName(state.CipherSuite),
+						"attempt", attempt,
 					)
 				}
 			},
 			WroteHeaders: func() {
-				logger.Debug("HTTP Trace: Wrote request headers")
+				logger.Debug("HTTP Trace: Wrote request headers", "attempt", attempt)
 			},
 			WroteRequest: func(info httptrace.WroteRequestInfo) {
 				if info.Err != nil {
-					logger.Warn("HTTP Trace: Failed to write request", "error", info.Err)
+					logger.Warn("HTTP Trace: Failed to write request", "error", info.Err, "attempt", attempt)
 				} else {
-					logger.Debug("HTTP Trace: Wrote full request")
+					logger.Debug("HTTP Trace: Wrote full request", "attempt", attempt)
 				}
 			},
 			GotFirstResponseByte: func() {
-				logger.Debug("HTTP Trace: Received first response byte")
+				logger.Debug("HTTP Trace: Received first response byte", "attempt", attempt)
 			},
 		}
 
@@ -742,7 +840,7 @@ func (r *Request) Send(ctx context.Context) *Response {
 	resp, err := r.client.Do(req)
 	if err != nil {
 		RecordSpanError(span, err)
-		return NewResponse(nil, err)
+		return nil, err
 	}
 
 	// Set span response attributes
@@ -751,20 +849,20 @@ func (r *Request) Send(ctx context.Context) *Response {
 	if r.dumpResponse {
 		dump, err := httputil.DumpResponse(resp, true)
 		if err == nil {
-			r.logger.Debug("HTTP Response", "dump", string(dump))
+			r.logger.Debug("HTTP Response", "dump", string(dump), "attempt", attempt)
 		} else {
-			r.logger.Warn("Failed to dump response", "error", err)
+			r.logger.Warn("Failed to dump response", "error", err, "attempt", attempt)
 		}
 	}
 
-	response := NewResponse(resp, nil)
+	response := NewResponseWithZstdDict(resp, nil, r.zstdDictionary)
 
 	// Auto unmarshal response
 	if !r.disableAutoUnmarshal {
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 && r.result != nil {
 			if err := response.JSON(r.result); err != nil {
 				RecordSpanError(span, err)
-				return NewResponse(resp, fmt.Errorf("failed to unmarshal success response: %w", err))
+				return nil, fmt.Errorf("failed to unmarshal success response: %w", err)
 			}
 		} else {
 			// Check if it's a custom error status code
@@ -783,13 +881,84 @@ func (r *Request) Send(ctx context.Context) *Response {
 			if isError && r.errorResult != nil {
 				if err := response.JSON(r.errorResult); err != nil {
 					RecordSpanError(span, err)
-					return NewResponse(resp, fmt.Errorf("failed to unmarshal error response: %w", err))
+					return nil, fmt.Errorf("failed to unmarshal error response: %w", err)
 				}
 			}
 		}
 	}
 
-	return response
+	return response, nil
+}
+
+// Send executes the request with optional retry
+func (r *Request) Send(ctx context.Context) *Response {
+	if r.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.timeout)
+		defer cancel()
+	}
+
+	// If no retries configured, just send once
+	if r.maxRetries <= 0 {
+		resp, err := r.sendOnce(ctx, 0)
+		if err != nil {
+			return NewResponse(nil, err)
+		}
+		return resp
+	}
+
+	// Retry loop
+	var lastErr error
+	var lastResp *Response
+	for attempt := 0; attempt <= r.maxRetries; attempt++ {
+		resp, err := r.sendOnce(ctx, attempt)
+		if err == nil {
+			// Check if status code is retryable
+			statusCode := resp.StatusCode()
+			if !isRetryableStatusCode(statusCode, r.retryableStatuses) {
+				return resp
+			}
+			// Status code is retryable, continue to retry
+			lastResp = resp
+			lastErr = fmt.Errorf("retryable status code: %d", statusCode)
+		} else {
+			// Check if error is retryable
+			if !isRetryableError(err) {
+				return NewResponse(nil, err)
+			}
+			lastErr = err
+		}
+
+		// If this was the last attempt, break
+		if attempt >= r.maxRetries {
+			break
+		}
+
+		// Calculate backoff duration
+		backoff := calculateBackoff(attempt, r.retryInterval, r.retryBackoffFactor, r.retryJitter)
+
+		// Log retry
+		r.logger.Info("Retrying request",
+			"attempt", attempt+1,
+			"max_attempts", r.maxRetries,
+			"backoff", backoff.String(),
+			"error", lastErr.Error(),
+		)
+
+		// Wait for backoff or context cancellation
+		select {
+		case <-ctx.Done():
+			return NewResponse(nil, ctx.Err())
+		case <-time.After(backoff):
+			// Continue to next attempt
+		}
+	}
+
+	// All retries failed
+	if lastResp != nil {
+		return NewResponseWithZstdDict(lastResp.Response, lastErr, r.zstdDictionary)
+	}
+	return NewResponse(nil, lastErr)
 }
 
 // buildRequest constructs the http.Request
@@ -820,15 +989,22 @@ func (r *Request) buildRequest(ctx context.Context) (*http.Request, error) {
 			}
 
 			var compressed bytes.Buffer
-			encoder, err := zstd.NewWriter(&compressed)
+			encoder, err := GetZstdEncoder(&compressed, r.zstdCompressionLevel, r.zstdDictionary)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create zstd encoder: %w", err)
 			}
 			if _, err := encoder.Write(bodyBytes); err != nil {
-				encoder.Close()
+				if r.zstdDictionary == nil {
+					PutZstdEncoder(encoder)
+				} else {
+					encoder.Close()
+				}
 				return nil, fmt.Errorf("failed to compress body: %w", err)
 			}
 			encoder.Close()
+			if r.zstdDictionary == nil {
+				PutZstdEncoder(encoder)
+			}
 			bodyReader = &compressed
 		} else {
 			bodyReader, err = r.body.Body()
@@ -1013,4 +1189,46 @@ func mergeClientTraces(traces ...*httptrace.ClientTrace) *httptrace.ClientTrace 
 // isPointer checks if a value is a pointer
 func isPointer(v interface{}) bool {
 	return reflect.ValueOf(v).Kind() == reflect.Ptr
+}
+
+// isRetryableError checks if an error should trigger a retry
+func isRetryableError(err error) bool {
+	// Check for timeout errors, connection errors, etc.
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	// Check for other retryable error types
+	if errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		strings.Contains(err.Error(), "connection reset by peer") ||
+		strings.Contains(err.Error(), "connection refused") ||
+		strings.Contains(err.Error(), "EOF") {
+		return true
+	}
+	return false
+}
+
+// isRetryableStatusCode checks if a status code should trigger a retry
+func isRetryableStatusCode(code int, retryableStatuses []int) bool {
+	for _, s := range retryableStatuses {
+		if code == s {
+			return true
+		}
+	}
+	return false
+}
+
+// calculateBackoff calculates the backoff duration with jitter
+func calculateBackoff(attempt int, baseInterval time.Duration, backoffFactor float64, jitter float64) time.Duration {
+	// Exponential backoff: baseInterval * (backoffFactor ^ attempt)
+	backoff := float64(baseInterval) * math.Pow(backoffFactor, float64(attempt))
+
+	// Add jitter: random value between backoff*(1-jitter) and backoff*(1+jitter)
+	if jitter > 0 {
+		jitterAmount := backoff * jitter
+		backoff = backoff - jitterAmount + (rand.Float64() * 2 * jitterAmount)
+	}
+
+	return time.Duration(backoff)
 }

@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.0.5 - 2026-04-08
+
+### Features
+- **Retry Functionality**: Added automatic retry support with exponential backoff and jitter
+  - Client-level configuration with `WithRetry()`, `WithRetryConfig()`, `WithRetryableStatuses()`
+  - Request-level override with `SetRetry()`, `SetRetryConfig()`, `SetRetryableStatuses()`
+  - Default retryable status codes: 429, 500, 502, 503, 504
+  - Automatic retry on network errors: timeouts, connection resets, connection refusals, etc.
+  - OpenTelemetry integration with retry attributes tracking
+- **Zstd Improvements**: Enhanced zstd compression support with reuse capabilities
+  - Zstd encoder/decoder pooling for improved performance in high-throughput scenarios
+  - Pre-trained zstd dictionary support for better compression ratios
+  - Client-level configuration with `WithZstdCompressionLevel()`, `WithZstdDictionary()`, `WithZstdPooling()`
+  - Request-level configuration with `SetZstdCompressionLevel()`, `SetZstdDictionary()`, `EnableZstdCompressionWithLevel()`
+
+### Improvements
+- **Performance**: Zstd compression/decompression performance improved by up to 30% via pooling
+- **Backward Compatibility**: All new features are fully backward compatible, no breaking changes
+
 ## v0.0.4 - 2026-03-27
 
 ### Breaking Changes

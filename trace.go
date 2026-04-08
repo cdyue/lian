@@ -72,3 +72,11 @@ func CreateClientTrace(span TraceContext) *httptrace.ClientTrace {
 	}
 	return createClientTrace(span)
 }
+
+// SetSpanAttribute sets a custom attribute to span
+func SetSpanAttribute(span TraceContext, key string, value interface{}) {
+	if span == nil {
+		return
+	}
+	setSpanAttribute(span, key, value)
+}

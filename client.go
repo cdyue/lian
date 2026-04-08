@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"runtime"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 var defaultClient = &http.Client{}
@@ -17,12 +19,22 @@ func init() {
 
 // Option represents client configuration options
 type Option struct {
-	disableKeepAlive   bool
-	insecureSkipVerify bool
-	disableCompression bool
-	maxIdleConns       int
-	idleConnTimeout    time.Duration
-	timeout            time.Duration
+	disableKeepAlive     bool
+	insecureSkipVerify   bool
+	disableCompression   bool
+	maxIdleConns         int
+	idleConnTimeout      time.Duration
+	timeout              time.Duration
+	// Retry configuration
+	maxRetries         int           // Maximum number of retries, 0 means no retries
+	retryInterval      time.Duration // Base retry interval
+	retryBackoffFactor float64       // Exponential backoff factor
+	retryJitter        float64       // Jitter factor (0-1)
+	retryableStatuses  []int         // HTTP status codes that should trigger a retry
+	// Zstd configuration
+	zstdCompressionLevel int    // Zstd compression level
+	zstdDictionary       []byte // Pre-trained zstd dictionary
+	zstdEnablePooling    bool   // Enable zstd encoder/decoder pooling
 }
 
 // OpFunc is a function type for setting options
@@ -70,12 +82,66 @@ func WithTimeout(d time.Duration) OpFunc {
 	}
 }
 
+// WithRetry enables retry with default configuration
+func WithRetry(maxRetries int) OpFunc {
+	return func(op *Option) {
+		op.maxRetries = maxRetries
+	}
+}
+
+// WithRetryConfig sets full retry configuration
+func WithRetryConfig(maxRetries int, interval time.Duration, backoffFactor float64, jitter float64) OpFunc {
+	return func(op *Option) {
+		op.maxRetries = maxRetries
+		op.retryInterval = interval
+		op.retryBackoffFactor = backoffFactor
+		op.retryJitter = jitter
+	}
+}
+
+// WithRetryableStatuses sets custom retryable HTTP status codes
+func WithRetryableStatuses(statuses ...int) OpFunc {
+	return func(op *Option) {
+		op.retryableStatuses = statuses
+	}
+}
+
+// WithZstdCompressionLevel sets the zstd compression level
+func WithZstdCompressionLevel(level int) OpFunc {
+	return func(op *Option) {
+		op.zstdCompressionLevel = level
+	}
+}
+
+// WithZstdDictionary sets the pre-trained zstd dictionary
+func WithZstdDictionary(dict []byte) OpFunc {
+	return func(op *Option) {
+		op.zstdDictionary = dict
+	}
+}
+
+// WithZstdPooling enables or disables zstd encoder/decoder pooling
+func WithZstdPooling(enable bool) OpFunc {
+	return func(op *Option) {
+		op.zstdEnablePooling = enable
+	}
+}
+
 // NewClient creates a new http.Client with custom options
 func NewClient(opts ...OpFunc) *http.Client {
 	op := &Option{
-		maxIdleConns:    100,
-		idleConnTimeout: 90 * time.Second,
-		timeout:         30 * time.Second,
+		maxIdleConns:         100,
+		idleConnTimeout:      90 * time.Second,
+		timeout:              30 * time.Second,
+		// Retry defaults
+		maxRetries:         0, // Disable by default for backward compatibility
+		retryInterval:      100 * time.Millisecond,
+		retryBackoffFactor: 2.0,
+		retryJitter:        0.2,
+		retryableStatuses:  []int{429, 500, 502, 503, 504},
+		// Zstd defaults
+		zstdCompressionLevel: int(zstd.SpeedDefault),
+		zstdEnablePooling:    true, // Enable pooling by default for better performance
 	}
 	for _, v := range opts {
 		v(op)

@@ -7,16 +7,47 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sync"
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
 )
 
+// Global zstd decoder pool
+var zstdDecoderPool = &sync.Pool{
+	New: func() interface{} {
+		decoder, _ := zstd.NewReader(nil)
+		return decoder
+	},
+}
+
+// GetZstdDecoder gets a decoder from the pool or creates a new one
+func GetZstdDecoder(r io.Reader, dict []byte) (*zstd.Decoder, error) {
+	// If dictionary is provided, we can't use the pool
+	if dict != nil {
+		return zstd.NewReader(r, zstd.WithDecoderDicts(dict))
+	}
+
+	decoder := zstdDecoderPool.Get().(*zstd.Decoder)
+	decoder.Reset(r)
+	return decoder, nil
+}
+
+// PutZstdDecoder returns a decoder to the pool
+func PutZstdDecoder(decoder *zstd.Decoder) {
+	// Don't pool decoders with custom dictionaries
+	if decoder != nil {
+		decoder.Close()
+		zstdDecoderPool.Put(decoder)
+	}
+}
+
 // Response wraps the standard http.Response with additional functionality
 type Response struct {
 	*http.Response
-	body []byte
-	err  error
+	body            []byte
+	err             error
+	zstdDictionary  []byte // Zstd dictionary for decompression
 }
 
 // NewResponse creates a new Response wrapper
@@ -24,6 +55,15 @@ func NewResponse(resp *http.Response, err error) *Response {
 	return &Response{
 		Response: resp,
 		err:      err,
+	}
+}
+
+// NewResponseWithZstdDict creates a new Response wrapper with zstd dictionary
+func NewResponseWithZstdDict(resp *http.Response, err error, dict []byte) *Response {
+	return &Response{
+		Response:        resp,
+		err:             err,
+		zstdDictionary:  dict,
 	}
 }
 
@@ -82,11 +122,17 @@ func (r *Response) Bytes() ([]byte, error) {
 		defer gr.Close()
 		reader = gr
 	case "zstd":
-		zr, err := zstd.NewReader(reader)
+		zr, err := GetZstdDecoder(reader, r.zstdDictionary)
 		if err != nil {
 			return nil, err
 		}
-		defer zr.Close()
+		defer func() {
+			if r.zstdDictionary == nil {
+				PutZstdDecoder(zr)
+			} else {
+				zr.Close()
+			}
+		}()
 		reader = zr
 	case "deflate":
 		reader = flate.NewReader(reader)
