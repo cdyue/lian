@@ -6,6 +6,10 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/contrib/propagators/b3"
 )
 
 // Global default request instance
@@ -13,6 +17,9 @@ var defaultRequest = NewRequest()
 
 // Global trace enable flag
 var enableTraceGlobal = false
+
+// Global trace propagators configuration
+var tracePropagatorsGlobal propagation.TextMapPropagator
 
 // SetTimeout sets the default timeout for all requests
 func SetTimeout(timeout time.Duration) {
@@ -133,11 +140,55 @@ func EnableDumpResponse() {
 // EnableOtelTrace enables OpenTelemetry tracing globally for all requests
 func EnableOtelTrace() {
 	enableTraceGlobal = true
+	if tracePropagatorsGlobal == nil {
+		// Default to W3C Trace Context for backward compatibility
+		tracePropagatorsGlobal = propagation.TraceContext{}
+		otel.SetTextMapPropagator(tracePropagatorsGlobal)
+	}
 }
 
 // DisableOtelTrace disables OpenTelemetry tracing globally for all requests
 func DisableOtelTrace() {
 	enableTraceGlobal = false
+}
+
+// SetTracePropagationFormats sets the trace propagation formats to use
+// Supported formats: "w3c" (default), "b3", "b3multi"
+func SetTracePropagationFormats(formats ...string) {
+	var propagators []propagation.TextMapPropagator
+
+	for _, format := range formats {
+		switch format {
+		case TracePropagationW3C:
+			propagators = append(propagators, propagation.TraceContext{})
+		case TracePropagationB3:
+			propagators = append(propagators, b3.New(b3.WithInjectEncoding(b3.B3SingleHeader)))
+		case TracePropagationB3Multi:
+			propagators = append(propagators, b3.New(b3.WithInjectEncoding(b3.B3MultipleHeader)))
+		}
+	}
+
+	if len(propagators) == 0 {
+		// Default to W3C if no valid formats provided
+		tracePropagatorsGlobal = propagation.TraceContext{}
+	} else if len(propagators) == 1 {
+		tracePropagatorsGlobal = propagators[0]
+	} else {
+		tracePropagatorsGlobal = propagation.NewCompositeTextMapPropagator(propagators...)
+	}
+
+	// Set as global OTel propagator for consistency
+	otel.SetTextMapPropagator(tracePropagatorsGlobal)
+}
+
+// EnableB3TracePropagation enables B3 single header propagation format
+func EnableB3TracePropagation() {
+	SetTracePropagationFormats(TracePropagationB3)
+}
+
+// EnableCompositeTracePropagation enables both W3C and B3 propagation formats
+func EnableCompositeTracePropagation() {
+	SetTracePropagationFormats(TracePropagationW3C, TracePropagationB3)
 }
 
 // Get makes a GET request using the default client

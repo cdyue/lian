@@ -6,6 +6,16 @@ import (
 	"net/http/httptrace"
 )
 
+// Trace propagation format constants
+const (
+	// TracePropagationW3C is the W3C Trace Context propagation format (default)
+	TracePropagationW3C = "w3c"
+	// TracePropagationB3 is the B3 single header propagation format
+	TracePropagationB3 = "b3"
+	// TracePropagationB3Multi is the B3 multi-header propagation format
+	TracePropagationB3Multi = "b3multi"
+)
+
 // TraceContext is an abstraction for trace context
 type TraceContext interface{}
 

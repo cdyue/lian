@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.0.6 - 2026-04-10
+
+### New Features
+1. **Trace Propagation Format Configuration**
+   - Defaults to W3C Trace Context format, maintains full backward compatibility
+   - Adds optional B3 propagation format support (both single-header and multi-header formats)
+   - Global configuration APIs: `SetTracePropagationFormats()`, `EnableB3TracePropagation()`, `EnableCompositeTracePropagation()`
+   - Per-request propagation format override with chainable methods
+   - Functional options support for propagation configuration when creating Request instances
+   
+2. **API Usability Improvements**
+   - Renamed `SetOperator()` to more semantically accurate `SetUserID()` (old method retained for backward compatibility with deprecation notice)
+   - Added corresponding `WithUserID()` and `WithTenant()` functional options
+   - Fixed `SetTenant()` and `SetUserID()` to respect custom header names configured in `HeaderMapping` (previously hardcoded to use "X-Tenant-Id" and "X-User-Id")
+
+### Dependencies
+- Added optional dependency: `go.opentelemetry.io/contrib/propagators/b3 v1.42.0` (required only if using B3 propagation format)
+
+### Compatibility
+- 100% backward compatible, no breaking changes
+- All existing code continues to work without modification
+
 ## v0.0.5 - 2026-04-08
 
 ### Features

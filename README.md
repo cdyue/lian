@@ -9,7 +9,7 @@ Lian is a high-performance, production-ready HTTP client library for Go, designe
 - **Request Compression**: Optional zstd compression for request bodies with dictionary support and instance pooling
 - **Automatic Retry**: Configurable automatic retry with exponential backoff and jitter for transient errors
 - **Structured Logging**: Uses standard library `slog` by default, supports custom logger implementations
-- **OpenTelemetry Support**: Optional built-in distributed tracing integration
+- **OpenTelemetry Support**: Built-in distributed tracing integration with configurable propagation formats (W3C, B3)
 - **Context-Aware**: Full support for standard `context.Context` propagation
 - **Customizable Header Mapping**: Flexible configuration for authentication and tenant headers
 - **Automatic Response Unmarshaling**: Directly unmarshal JSON responses into structs
@@ -267,6 +267,38 @@ req := lian.NewRequest().
 
 Lian automatically creates client spans, propagates trace headers, and records all HTTP events to your OpenTelemetry collector when tracing is enabled.
 
+#### Trace Propagation Format Configuration
+Lian supports configurable trace propagation formats, defaulting to W3C Trace Context with optional B3 support.
+
+```go
+// Global configuration
+lian.SetTracePropagationFormats(lian.TracePropagationW3C, lian.TracePropagationB3) // Enable both W3C and B3
+// Or use convenience methods
+lian.EnableB3TracePropagation() // Only use B3 single header format
+lian.EnableCompositeTracePropagation() // Use both W3C and B3 (for migration scenarios)
+
+// Per-request override (chainable)
+resp := lian.Get("https://api.example.com/data").
+    SetTracePropagationFormats(lian.TracePropagationB3Multi). // Use B3 multi-header format for this request
+    Send()
+
+// Configuration via functional options when creating Request
+req := lian.NewRequest(
+    lian.WithB3TracePropagation(),
+    lian.WithTimeout(10*time.Second),
+)
+```
+
+Supported propagation formats:
+- `TracePropagationW3C` (default): W3C Trace Context format (`traceparent` and `tracestate` headers)
+- `TracePropagationB3`: B3 single header format (`b3` header)
+- `TracePropagationB3Multi`: B3 multi-header format (`X-B3-TraceId`, `X-B3-SpanId`, etc.)
+
+Note: To use B3 propagation formats, you need to install the optional dependency:
+```bash
+go get go.opentelemetry.io/contrib/propagators/b3@v1.42.0
+```
+
 ## 🔧 Compilation Notes
 
 ### Using Standard JSON (stable)
@@ -307,6 +339,12 @@ GOEXPERIMENT=jsonv2 go build ./...
 - `WithDisableCompression() OpFunc` - Disable response compression
 - `WithMaxIdleConns(n int) OpFunc` - Set maximum number of idle connections
 - `WithIdleConnTimeout(d time.Duration) OpFunc` - Set idle connection timeout
+- `WithTenant(tenant string) OpFunc` - Set tenant ID header
+- `WithUserID(userID string) OpFunc` - Set user ID header
+- `WithOperator(operator string) OpFunc` - Deprecated alias for WithUserID
+- `WithTracePropagationFormats(formats ...string) OpFunc` - Set trace propagation formats
+- `WithB3TracePropagation() OpFunc` - Enable B3 single header propagation format
+- `WithCompositeTracePropagation() OpFunc` - Enable both W3C and B3 propagation formats
 
 ### Request Configuration
 - `SetHeader(key, value string) *Request`
@@ -316,6 +354,9 @@ GOEXPERIMENT=jsonv2 go build ./...
 - `SetRawBody(body io.Reader, contentType string) *Request`
 - `SetBearerToken(token string) *Request`
 - `SetBasicAuth(username, password string) *Request`
+- `SetTenant(tenant string) *Request` - Set tenant ID header (uses configured header name, default "X-Tenant-Id")
+- `SetUserID(userID string) *Request` - Set user ID header (uses configured header name, default "X-User-Id")
+- `SetOperator(operator string) *Request` - Deprecated alias for SetUserID
 - `FromContext(ctx context.Context) *Request`
 - `SetRetry(maxRetries int) *Request` - Enable retry for this request
 - `SetRetryConfig(maxRetries int, interval time.Duration, backoffFactor float64, jitter float64) *Request` - Set full retry configuration
@@ -324,6 +365,9 @@ GOEXPERIMENT=jsonv2 go build ./...
 - `EnableZstdCompressionWithLevel(level int) *Request` - Enable zstd compression with custom level
 - `SetZstdCompressionLevel(level int) *Request` - Set zstd compression level
 - `SetZstdDictionary(dict []byte) *Request` - Set pre-trained zstd dictionary for this request
+- `SetTracePropagationFormats(formats ...string) *Request` - Set trace propagation formats for this request
+- `EnableB3TracePropagation() *Request` - Enable B3 single header propagation format
+- `EnableCompositeTracePropagation() *Request` - Enable both W3C and B3 propagation formats
 
 ### Response Methods
 - `resp.StatusCode() int`

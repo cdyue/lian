@@ -36,7 +36,11 @@ func endSpan(spanCtx TraceContext) {
 }
 
 func injectTraceHeaders(ctx context.Context, header http.Header) {
-	propagator := otel.GetTextMapPropagator()
+	propagator := tracePropagatorsGlobal
+	if propagator == nil {
+		// Fallback to default W3C if not initialized
+		propagator = propagation.TraceContext{}
+	}
 	propagator.Inject(ctx, propagation.HeaderCarrier(header))
 }
 

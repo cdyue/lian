@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/contrib/propagators/b3"
 )
 
 // Logger is the interface for logging
@@ -73,6 +75,9 @@ type Request struct {
 	zstdCompressionLevel int    // Zstd compression level
 	zstdDictionary       []byte // Pre-trained zstd dictionary
 	zstdEnablePooling    bool   // Enable zstd encoder/decoder pooling
+
+	// Trace propagation configuration (per-request override)
+	propagators propagation.TextMapPropagator // Custom trace propagators for this request
 }
 
 // slogLogger wraps slog as default logger implementation
@@ -129,8 +134,12 @@ func PutZstdEncoder(encoder *zstd.Encoder) {
 }
 
 // NewRequest creates a new HTTP request with default settings
-func NewRequest() *Request {
-	return &Request{
+// RequestOption is a functional option for configuring Request
+type RequestOption func(*Request)
+
+// NewRequest creates a new Request instance with default configuration
+func NewRequest(opts ...RequestOption) *Request {
+	r := &Request{
 		client:        defaultClient,
 		header:        make(http.Header),
 		queryParams:   make(url.Values),
@@ -146,6 +155,56 @@ func NewRequest() *Request {
 		// Zstd defaults
 		zstdCompressionLevel: int(zstd.SpeedDefault),
 		zstdEnablePooling:    true, // Enable pooling by default for better performance
+	}
+
+	// Apply functional options
+	for _, opt := range opts {
+		opt(r)
+	}
+
+	return r
+}
+
+// WithTracePropagationFormats sets trace propagation formats for the request
+func WithTracePropagationFormats(formats ...string) RequestOption {
+	return func(r *Request) {
+		r.SetTracePropagationFormats(formats...)
+	}
+}
+
+// WithB3TracePropagation enables B3 single header propagation format
+func WithB3TracePropagation() RequestOption {
+	return func(r *Request) {
+		r.EnableB3TracePropagation()
+	}
+}
+
+// WithCompositeTracePropagation enables both W3C and B3 propagation formats
+func WithCompositeTracePropagation() RequestOption {
+	return func(r *Request) {
+		r.EnableCompositeTracePropagation()
+	}
+}
+
+// WithTenant sets tenant ID header for the request
+func WithTenant(tenant string) RequestOption {
+	return func(r *Request) {
+		r.SetTenant(tenant)
+	}
+}
+
+// WithUserID sets user ID header for the request
+func WithUserID(userID string) RequestOption {
+	return func(r *Request) {
+		r.SetUserID(userID)
+	}
+}
+
+// WithOperator sets X-User-Id header for the request
+// Deprecated: Use WithUserID instead
+func WithOperator(operator string) RequestOption {
+	return func(r *Request) {
+		r.SetOperator(operator)
 	}
 }
 
@@ -441,24 +500,39 @@ func (r *Request) FromContext(ctx context.Context) *Request {
 	return r
 }
 
-// SetTenant sets X-Tenant-Id header
+// SetTenant sets tenant ID header (uses configured TenantIDHeader name, default "X-Tenant-Id")
 func (r *Request) SetTenant(tenant string) *Request {
+	headerName := r.headerMapping.TenantIDHeader
+	if headerName == "" {
+		headerName = "X-Tenant-Id" // Fallback to default if not configured
+	}
 	if tenant == "" {
-		r.header.Del("X-Tenant-Id")
+		r.header.Del(headerName)
 		return r
 	}
-	r.header.Set("X-Tenant-Id", tenant)
+	r.header.Set(headerName, tenant)
+	return r
+}
+
+// SetUserID sets user ID header (uses configured UserIDHeader name, default "X-User-Id")
+// More intuitive alias for SetOperator
+func (r *Request) SetUserID(userID string) *Request {
+	headerName := r.headerMapping.UserIDHeader
+	if headerName == "" {
+		headerName = "X-User-Id" // Fallback to default if not configured
+	}
+	if userID == "" {
+		r.header.Del(headerName)
+		return r
+	}
+	r.header.Set(headerName, userID)
 	return r
 }
 
 // SetOperator sets X-User-Id header
+// Deprecated: Use SetUserID instead, which is more semantically accurate
 func (r *Request) SetOperator(operator string) *Request {
-	if operator == "" {
-		r.header.Del("X-User-Id")
-		return r
-	}
-	r.header.Set("X-User-Id", operator)
-	return r
+	return r.SetUserID(operator)
 }
 
 // SetTenantUser sets both tenant and operator headers
@@ -567,6 +641,43 @@ func (r *Request) SetRetryableStatuses(statuses ...int) *Request {
 func (r *Request) DisableTracePropagation() *Request {
 	r.disableTracePropagation = true
 	return r
+}
+
+// SetTracePropagationFormats sets trace propagation formats for this request (overrides global setting)
+// Supported formats: "w3c" (default), "b3", "b3multi"
+func (r *Request) SetTracePropagationFormats(formats ...string) *Request {
+	var propagators []propagation.TextMapPropagator
+
+	for _, format := range formats {
+		switch format {
+		case TracePropagationW3C:
+			propagators = append(propagators, propagation.TraceContext{})
+		case TracePropagationB3:
+			propagators = append(propagators, b3.New(b3.WithInjectEncoding(b3.B3SingleHeader)))
+		case TracePropagationB3Multi:
+			propagators = append(propagators, b3.New(b3.WithInjectEncoding(b3.B3MultipleHeader)))
+		}
+	}
+
+	if len(propagators) == 0 {
+		// Default to W3C if no valid formats provided
+		r.propagators = propagation.TraceContext{}
+	} else if len(propagators) == 1 {
+		r.propagators = propagators[0]
+	} else {
+		r.propagators = propagation.NewCompositeTextMapPropagator(propagators...)
+	}
+	return r
+}
+
+// EnableB3TracePropagation enables B3 single header propagation format for this request
+func (r *Request) EnableB3TracePropagation() *Request {
+	return r.SetTracePropagationFormats(TracePropagationB3)
+}
+
+// EnableCompositeTracePropagation enables both W3C and B3 propagation formats for this request
+func (r *Request) EnableCompositeTracePropagation() *Request {
+	return r.SetTracePropagationFormats(TracePropagationW3C, TracePropagationB3)
 }
 
 // DisableForwardedFor disables X-Forwarded-For header injection
@@ -740,7 +851,13 @@ func (r *Request) sendOnce(ctx context.Context, attempt int) (*Response, error) 
 
 	// Inject trace headers
 	if !r.disableTracePropagation {
-		InjectTraceHeaders(ctx, req.Header)
+		if r.propagators != nil {
+			// Use per-request propagators if set
+			r.propagators.Inject(ctx, propagation.HeaderCarrier(req.Header))
+		} else {
+			// Use global propagators
+			InjectTraceHeaders(ctx, req.Header)
+		}
 	}
 
 	// Set span request attributes
