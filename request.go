@@ -22,16 +22,16 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
-	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/contrib/propagators/b3"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 // Logger is the interface for logging
 type Logger interface {
-	Info(msg string, args ...interface{})
-	Debug(msg string, args ...interface{})
-	Warn(msg string, args ...interface{})
-	Error(msg string, args ...interface{})
+	Info(msg string, args ...any)
+	Debug(msg string, args ...any)
+	Warn(msg string, args ...any)
+	Error(msg string, args ...any)
 }
 
 // Request represents an HTTP request
@@ -45,8 +45,6 @@ type Request struct {
 	cookies     []*http.Cookie
 	logger      Logger // Logger instance
 
-	// Header mapping configuration
-	headerMapping HeaderMapping // Custom core header names and extraction methods
 
 	// Configuration flags
 	timeout                 time.Duration
@@ -55,14 +53,14 @@ type Request struct {
 	enableHTTPTrace         bool // Enable HTTP trace logging to console
 	disableCompression      bool
 	compressRequest         bool
-	disableTrace            bool        // Disable OpenTelemetry tracing for this request
-	disableTracePropagation bool        // Disable trace header propagation
-	disableForwardedFor     bool        // Disable X-Forwarded-For header injection
-	disableAutoUnmarshal    bool        // Disable automatic response unmarshaling, return raw body directly
-	markAsAsync             bool        // Mark as async request, span kind will be Producer
-	result                  interface{} // Automatically unmarshal success response to this object
-	errorResult             interface{} // Automatically unmarshal error response to this object
-	errorStatusCodes        []int       // Custom list of error status codes
+	disableTrace            bool  // Disable OpenTelemetry tracing for this request
+	disableTracePropagation bool  // Disable trace header propagation
+	disableForwardedFor     bool  // Disable X-Forwarded-For header injection
+	disableAutoUnmarshal    bool  // Disable automatic response unmarshaling, return raw body directly
+	markAsAsync             bool  // Mark as async request, span kind will be Producer
+	result                  any   // Automatically unmarshal success response to this object
+	errorResult             any   // Automatically unmarshal error response to this object
+	errorStatusCodes        []int // Custom list of error status codes
 
 	// Retry configuration
 	maxRetries         int           // Maximum number of retries, 0 means no retries
@@ -85,19 +83,19 @@ type slogLogger struct {
 	logger *slog.Logger
 }
 
-func (l *slogLogger) Info(msg string, args ...interface{}) {
+func (l *slogLogger) Info(msg string, args ...any) {
 	l.logger.Info(msg, args...)
 }
 
-func (l *slogLogger) Debug(msg string, args ...interface{}) {
+func (l *slogLogger) Debug(msg string, args ...any) {
 	l.logger.Debug(msg, args...)
 }
 
-func (l *slogLogger) Warn(msg string, args ...interface{}) {
+func (l *slogLogger) Warn(msg string, args ...any) {
 	l.logger.Warn(msg, args...)
 }
 
-func (l *slogLogger) Error(msg string, args ...interface{}) {
+func (l *slogLogger) Error(msg string, args ...any) {
 	l.logger.Error(msg, args...)
 }
 
@@ -106,7 +104,7 @@ var defaultLogger Logger = &slogLogger{logger: slog.Default()}
 
 // Global zstd encoder pool
 var zstdEncoderPool = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		encoder, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
 		return encoder
 	},
@@ -145,7 +143,6 @@ func NewRequest(opts ...RequestOption) *Request {
 		queryParams:   make(url.Values),
 		cookies:       make([]*http.Cookie, 0),
 		logger:        defaultLogger,
-		headerMapping: defaultHeaderMapping, // Use global default header configuration
 		// Retry defaults (same as client defaults
 		maxRetries:         0, // Disable by default for backward compatibility
 		retryInterval:      100 * time.Millisecond,
@@ -186,94 +183,7 @@ func WithCompositeTracePropagation() RequestOption {
 	}
 }
 
-// WithTenant sets tenant ID header for the request
-func WithTenant(tenant string) RequestOption {
-	return func(r *Request) {
-		r.SetTenant(tenant)
-	}
-}
 
-// WithUserID sets user ID header for the request
-func WithUserID(userID string) RequestOption {
-	return func(r *Request) {
-		r.SetUserID(userID)
-	}
-}
-
-// WithOperator sets X-User-Id header for the request
-// Deprecated: Use WithUserID instead
-func WithOperator(operator string) RequestOption {
-	return func(r *Request) {
-		r.SetOperator(operator)
-	}
-}
-
-// SetHeaderMapping sets custom header mapping configuration for current request
-// Completely overrides the default configuration
-func (r *Request) SetHeaderMapping(mapping HeaderMapping) *Request {
-	r.headerMapping = mapping
-	return r
-}
-
-// SetAuthHeaderName sets custom authentication header name for current request
-func (r *Request) SetAuthHeaderName(headerName string) *Request {
-	r.headerMapping.AuthHeader = headerName
-	return r
-}
-
-// SetTenantIDHeaderName sets custom tenant ID header name for current request
-func (r *Request) SetTenantIDHeaderName(headerName string) *Request {
-	r.headerMapping.TenantIDHeader = headerName
-	return r
-}
-
-// SetUserIDHeaderName sets custom user ID header name for current request
-func (r *Request) SetUserIDHeaderName(headerName string) *Request {
-	r.headerMapping.UserIDHeader = headerName
-	return r
-}
-
-// SetTargetTenantHeaderName sets custom target tenant header name for current request
-func (r *Request) SetTargetTenantHeaderName(headerName string) *Request {
-	r.headerMapping.TargetTenantHeader = headerName
-	return r
-}
-
-// SetEntryPathHeaderName sets custom entry path header name for current request
-func (r *Request) SetEntryPathHeaderName(headerName string) *Request {
-	r.headerMapping.EntryPathHeader = headerName
-	return r
-}
-
-// SetAuthExtractor sets custom authentication extractor function for current request
-func (r *Request) SetAuthExtractor(extractor HeaderExtractor) *Request {
-	r.headerMapping.AuthExtractor = extractor
-	return r
-}
-
-// SetTenantIDExtractor sets custom tenant ID extractor function for current request
-func (r *Request) SetTenantIDExtractor(extractor HeaderExtractor) *Request {
-	r.headerMapping.TenantIDExtractor = extractor
-	return r
-}
-
-// SetUserIDExtractor sets custom user ID extractor function for current request
-func (r *Request) SetUserIDExtractor(extractor HeaderExtractor) *Request {
-	r.headerMapping.UserIDExtractor = extractor
-	return r
-}
-
-// SetTargetTenantExtractor sets custom target tenant extractor function for current request
-func (r *Request) SetTargetTenantExtractor(extractor HeaderExtractor) *Request {
-	r.headerMapping.TargetTenantExtractor = extractor
-	return r
-}
-
-// SetEntryPathExtractor sets custom entry path extractor function for current request
-func (r *Request) SetEntryPathExtractor(extractor HeaderExtractor) *Request {
-	r.headerMapping.EntryPathExtractor = extractor
-	return r
-}
 
 // SetClient sets a custom http.Client
 func (r *Request) SetClient(client *http.Client) *Request {
@@ -379,34 +289,6 @@ func (r *Request) SetBearerToken(token string) *Request {
 	return r
 }
 
-// HeaderExtractor is a function type for custom value extraction from context
-type HeaderExtractor func(ctx context.Context) string
-
-// HeaderMapping configures custom names and extraction methods for the 5 core headers
-type HeaderMapping struct {
-	// Custom header names
-	AuthHeader         string // Authentication header, default "Authorization"
-	TenantIDHeader     string // Tenant ID header, default "X-Tenant-Id"
-	UserIDHeader       string // User ID header, default "X-User-Id"
-	TargetTenantHeader string // Target tenant header, default "X-Target-Tenant"
-	EntryPathHeader    string // Entry path header, default "X-Entry-Path"
-
-	// Custom extractor functions, take precedence over header name configuration
-	AuthExtractor         HeaderExtractor // Custom authentication info extraction
-	TenantIDExtractor     HeaderExtractor // Custom tenant ID extraction
-	UserIDExtractor       HeaderExtractor // Custom user ID extraction
-	TargetTenantExtractor HeaderExtractor // Custom target tenant extraction
-	EntryPathExtractor    HeaderExtractor // Custom entry path extraction
-}
-
-// Default header configuration
-var defaultHeaderMapping = HeaderMapping{
-	AuthHeader:         "Authorization",
-	TenantIDHeader:     "X-Tenant-Id",
-	UserIDHeader:       "X-User-Id",
-	TargetTenantHeader: "X-Target-Tenant",
-	EntryPathHeader:    "X-Entry-Path",
-}
 
 // Standard context key definition
 type contextKey string
@@ -437,108 +319,7 @@ func (r *Request) SetUserAgent(ua string) *Request {
 	return r
 }
 
-// FromContext extracts core headers from standard context.Context according to header mapping configuration
-// All headers are optional, only non-empty values will be set
-func (r *Request) FromContext(ctx context.Context) *Request {
-	m := r.headerMapping
 
-	// Extract authentication info
-	var auth string
-	if m.AuthExtractor != nil {
-		auth = m.AuthExtractor(ctx)
-	} else if m.AuthHeader != "" {
-		auth = GetHeaderFromContext(ctx, m.AuthHeader)
-	}
-	if auth != "" {
-		r.SetHeader(m.AuthHeader, auth)
-	}
-
-	// Extract tenant ID
-	var tenantID string
-	if m.TenantIDExtractor != nil {
-		tenantID = m.TenantIDExtractor(ctx)
-	} else if m.TenantIDHeader != "" {
-		tenantID = GetHeaderFromContext(ctx, m.TenantIDHeader)
-	}
-	if tenantID != "" {
-		r.SetHeader(m.TenantIDHeader, tenantID)
-	}
-
-	// Extract user ID
-	var userID string
-	if m.UserIDExtractor != nil {
-		userID = m.UserIDExtractor(ctx)
-	} else if m.UserIDHeader != "" {
-		userID = GetHeaderFromContext(ctx, m.UserIDHeader)
-	}
-	if userID != "" {
-		r.SetHeader(m.UserIDHeader, userID)
-	}
-
-	// Extract target tenant
-	var targetTenant string
-	if m.TargetTenantExtractor != nil {
-		targetTenant = m.TargetTenantExtractor(ctx)
-	} else if m.TargetTenantHeader != "" {
-		targetTenant = GetHeaderFromContext(ctx, m.TargetTenantHeader)
-	}
-	if targetTenant != "" {
-		r.SetHeader(m.TargetTenantHeader, targetTenant)
-	}
-
-	// Extract entry path
-	var entryPath string
-	if m.EntryPathExtractor != nil {
-		entryPath = m.EntryPathExtractor(ctx)
-	} else if m.EntryPathHeader != "" {
-		entryPath = GetHeaderFromContext(ctx, m.EntryPathHeader)
-	}
-	if entryPath != "" {
-		r.SetHeader(m.EntryPathHeader, entryPath)
-	}
-
-	return r
-}
-
-// SetTenant sets tenant ID header (uses configured TenantIDHeader name, default "X-Tenant-Id")
-func (r *Request) SetTenant(tenant string) *Request {
-	headerName := r.headerMapping.TenantIDHeader
-	if headerName == "" {
-		headerName = "X-Tenant-Id" // Fallback to default if not configured
-	}
-	if tenant == "" {
-		r.header.Del(headerName)
-		return r
-	}
-	r.header.Set(headerName, tenant)
-	return r
-}
-
-// SetUserID sets user ID header (uses configured UserIDHeader name, default "X-User-Id")
-// More intuitive alias for SetOperator
-func (r *Request) SetUserID(userID string) *Request {
-	headerName := r.headerMapping.UserIDHeader
-	if headerName == "" {
-		headerName = "X-User-Id" // Fallback to default if not configured
-	}
-	if userID == "" {
-		r.header.Del(headerName)
-		return r
-	}
-	r.header.Set(headerName, userID)
-	return r
-}
-
-// SetOperator sets X-User-Id header
-// Deprecated: Use SetUserID instead, which is more semantically accurate
-func (r *Request) SetOperator(operator string) *Request {
-	return r.SetUserID(operator)
-}
-
-// SetTenantUser sets both tenant and operator headers
-func (r *Request) SetTenantUser(tenant, operator string) *Request {
-	return r.SetTenant(tenant).SetOperator(operator)
-}
 
 // SetContentType sets the Content-Type header
 func (r *Request) SetContentType(ct string) *Request {
@@ -699,13 +480,13 @@ func (r *Request) MarkAsAsync() *Request {
 }
 
 // SetResult sets the result object for automatic response parsing
-func (r *Request) SetResult(v interface{}) *Request {
+func (r *Request) SetResult(v any) *Request {
 	r.result = v
 	return r
 }
 
 // SetErrorResult sets the error result object for automatic error response parsing
-func (r *Request) SetErrorResult(v interface{}) *Request {
+func (r *Request) SetErrorResult(v any) *Request {
 	r.errorResult = v
 	return r
 }
@@ -717,14 +498,14 @@ func (r *Request) SetErrorStatusCodes(codes ...int) *Request {
 }
 
 // SetJSONBody sets the request body as JSON
-func (r *Request) SetJSONBody(v interface{}) *Request {
+func (r *Request) SetJSONBody(v any) *Request {
 	r.body = jsonBodyProvider{payload: v}
 	r.SetContentType(r.body.ContentType())
 	return r
 }
 
 // SetFormBody sets the request body as form encoded
-func (r *Request) SetFormBody(v interface{}) *Request {
+func (r *Request) SetFormBody(v any) *Request {
 	r.body = formBodyProvider{payload: v}
 	r.SetContentType(r.body.ContentType())
 	return r
@@ -1173,138 +954,71 @@ func b64encode(s string) string {
 func mergeClientTraces(traces ...*httptrace.ClientTrace) *httptrace.ClientTrace {
 	merged := &httptrace.ClientTrace{}
 
+	// Helper to merge hook functions
+	mergeHook := func(existing, new any) any {
+		if new == nil {
+			return existing
+		}
+		if existing == nil {
+			return new
+		}
+
+		switch e := existing.(type) {
+		case func(string):
+			n := new.(func(string))
+			return func(s string) { e(s); n(s) }
+		case func(httptrace.GotConnInfo):
+			n := new.(func(httptrace.GotConnInfo))
+			return func(info httptrace.GotConnInfo) { e(info); n(info) }
+		case func(httptrace.DNSStartInfo):
+			n := new.(func(httptrace.DNSStartInfo))
+			return func(info httptrace.DNSStartInfo) { e(info); n(info) }
+		case func(httptrace.DNSDoneInfo):
+			n := new.(func(httptrace.DNSDoneInfo))
+			return func(info httptrace.DNSDoneInfo) { e(info); n(info) }
+		case func(string, string):
+			n := new.(func(string, string))
+			return func(network, addr string) { e(network, addr); n(network, addr) }
+		case func(string, string, error):
+			n := new.(func(string, string, error))
+			return func(network, addr string, err error) { e(network, addr, err); n(network, addr, err) }
+		case func():
+			n := new.(func())
+			return func() { e(); n() }
+		case func(tls.ConnectionState, error):
+			n := new.(func(tls.ConnectionState, error))
+			return func(state tls.ConnectionState, err error) { e(state, err); n(state, err) }
+		case func(httptrace.WroteRequestInfo):
+			n := new.(func(httptrace.WroteRequestInfo))
+			return func(info httptrace.WroteRequestInfo) { e(info); n(info) }
+		default:
+			return new
+		}
+	}
+
 	for _, t := range traces {
 		if t == nil {
 			continue
 		}
 
-		// GetConn
-		if t.GetConn != nil {
-			prev := merged.GetConn
-			merged.GetConn = func(hostPort string) {
-				if prev != nil {
-					prev(hostPort)
-				}
-				t.GetConn(hostPort)
-			}
-		}
-
-		// GotConn
-		if t.GotConn != nil {
-			prev := merged.GotConn
-			merged.GotConn = func(info httptrace.GotConnInfo) {
-				if prev != nil {
-					prev(info)
-				}
-				t.GotConn(info)
-			}
-		}
-
-		// DNSStart
-		if t.DNSStart != nil {
-			prev := merged.DNSStart
-			merged.DNSStart = func(info httptrace.DNSStartInfo) {
-				if prev != nil {
-					prev(info)
-				}
-				t.DNSStart(info)
-			}
-		}
-
-		// DNSDone
-		if t.DNSDone != nil {
-			prev := merged.DNSDone
-			merged.DNSDone = func(info httptrace.DNSDoneInfo) {
-				if prev != nil {
-					prev(info)
-				}
-				t.DNSDone(info)
-			}
-		}
-
-		// ConnectStart
-		if t.ConnectStart != nil {
-			prev := merged.ConnectStart
-			merged.ConnectStart = func(network, addr string) {
-				if prev != nil {
-					prev(network, addr)
-				}
-				t.ConnectStart(network, addr)
-			}
-		}
-
-		// ConnectDone
-		if t.ConnectDone != nil {
-			prev := merged.ConnectDone
-			merged.ConnectDone = func(network, addr string, err error) {
-				if prev != nil {
-					prev(network, addr, err)
-				}
-				t.ConnectDone(network, addr, err)
-			}
-		}
-
-		// TLSHandshakeStart
-		if t.TLSHandshakeStart != nil {
-			prev := merged.TLSHandshakeStart
-			merged.TLSHandshakeStart = func() {
-				if prev != nil {
-					prev()
-				}
-				t.TLSHandshakeStart()
-			}
-		}
-
-		// TLSHandshakeDone
-		if t.TLSHandshakeDone != nil {
-			prev := merged.TLSHandshakeDone
-			merged.TLSHandshakeDone = func(state tls.ConnectionState, err error) {
-				if prev != nil {
-					prev(state, err)
-				}
-				t.TLSHandshakeDone(state, err)
-			}
-		}
-
-		// WroteHeaders
-		if t.WroteHeaders != nil {
-			prev := merged.WroteHeaders
-			merged.WroteHeaders = func() {
-				if prev != nil {
-					prev()
-				}
-				t.WroteHeaders()
-			}
-		}
-
-		// WroteRequest
-		if t.WroteRequest != nil {
-			prev := merged.WroteRequest
-			merged.WroteRequest = func(info httptrace.WroteRequestInfo) {
-				if prev != nil {
-					prev(info)
-				}
-				t.WroteRequest(info)
-			}
-		}
-
-		// GotFirstResponseByte
-		if t.GotFirstResponseByte != nil {
-			prev := merged.GotFirstResponseByte
-			merged.GotFirstResponseByte = func() {
-				if prev != nil {
-					prev()
-				}
-				t.GotFirstResponseByte()
-			}
-		}
+		merged.GetConn = mergeHook(merged.GetConn, t.GetConn).(func(string))
+		merged.GotConn = mergeHook(merged.GotConn, t.GotConn).(func(httptrace.GotConnInfo))
+		merged.DNSStart = mergeHook(merged.DNSStart, t.DNSStart).(func(httptrace.DNSStartInfo))
+		merged.DNSDone = mergeHook(merged.DNSDone, t.DNSDone).(func(httptrace.DNSDoneInfo))
+		merged.ConnectStart = mergeHook(merged.ConnectStart, t.ConnectStart).(func(string, string))
+		merged.ConnectDone = mergeHook(merged.ConnectDone, t.ConnectDone).(func(string, string, error))
+		merged.TLSHandshakeStart = mergeHook(merged.TLSHandshakeStart, t.TLSHandshakeStart).(func())
+		merged.TLSHandshakeDone = mergeHook(merged.TLSHandshakeDone, t.TLSHandshakeDone).(func(tls.ConnectionState, error))
+		merged.WroteHeaders = mergeHook(merged.WroteHeaders, t.WroteHeaders).(func())
+		merged.WroteRequest = mergeHook(merged.WroteRequest, t.WroteRequest).(func(httptrace.WroteRequestInfo))
+		merged.GotFirstResponseByte = mergeHook(merged.GotFirstResponseByte, t.GotFirstResponseByte).(func())
 	}
 
 	return merged
 }
 
 // isPointer checks if a value is a pointer
-func isPointer(v interface{}) bool {
+func isPointer(v any) bool {
 	return reflect.ValueOf(v).Kind() == reflect.Ptr
 }
 

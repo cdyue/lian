@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.0.7 - 2026-04-29
+
+### Breaking Changes
+- ❌ Removed all HeaderMapping related functionality, including:
+  - Global `SetDefaultHeaderMapping`, `SetDefaultAuthHeaderName`, `SetDefaultTenantIDHeaderName`, `SetDefaultUserIDHeaderName`, `SetDefaultTargetTenantHeaderName`, `SetDefaultEntryPathHeaderName` methods
+  - Global `SetDefaultAuthExtractor`, `SetDefaultTenantIDExtractor`, `SetDefaultUserIDExtractor`, `SetDefaultTargetTenantExtractor`, `SetDefaultEntryPathExtractor` methods
+  - Request-level `SetHeaderMapping`, `SetAuthHeaderName`, `SetTenantIDHeaderName`, `SetUserIDHeaderName`, `SetTargetTenantHeaderName`, `SetEntryPathHeaderName` methods
+  - Request-level `SetAuthExtractor`, `SetTenantIDExtractor`, `SetUserIDExtractor`, `SetTargetTenantExtractor`, `SetEntryPathExtractor` methods
+  - `FromContext()` method that provided automatic header extraction and injection from context
+  - `SetTenant`, `SetUserID`, `SetOperator`, `SetTenantUser` convenience header setter methods
+  - `WithTenant`, `WithUserID`, `WithOperator` functional option helpers
+
+### Improvements
+- ✨ Refactored `mergeClientTraces` implementation to eliminate duplicate code, while maintaining full backward compatibility for all HTTP tracing functionality
+- ✨ Replaced all remaining `interface{}` usages with modern Go 1.18+ `any` type alias for cleaner code
+- ✨ Fixed all code formatting issues to fully comply with standard Go `gofmt` formatting rules
+- ✨ All code now passes full `go vet` static analysis checks with zero warnings
+
+### Compatibility
+- Requires Go 1.18 or newer (due to `any` type alias usage)
+- All core HTTP client functionality remains 100% backward compatible
+- Only the explicitly removed header mapping related APIs are breaking changes
+
 ## v0.0.6 - 2026-04-10
 
 ### New Features

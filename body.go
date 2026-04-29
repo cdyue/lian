@@ -22,7 +22,7 @@ type BodyProvider interface {
 
 // jsonBodyProvider encodes a JSON tagged struct value as a Body for requests.
 type jsonBodyProvider struct {
-	payload interface{}
+	payload any
 }
 
 func (p jsonBodyProvider) ContentType() string {
@@ -45,7 +45,7 @@ func (p jsonBodyProvider) Bytes() ([]byte, error) {
 
 // formBodyProvider encodes a url tagged struct value as Body for requests.
 type formBodyProvider struct {
-	payload interface{}
+	payload any
 }
 
 func (p formBodyProvider) ContentType() string {

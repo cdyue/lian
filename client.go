@@ -19,12 +19,12 @@ func init() {
 
 // Option represents client configuration options
 type Option struct {
-	disableKeepAlive     bool
-	insecureSkipVerify   bool
-	disableCompression   bool
-	maxIdleConns         int
-	idleConnTimeout      time.Duration
-	timeout              time.Duration
+	disableKeepAlive   bool
+	insecureSkipVerify bool
+	disableCompression bool
+	maxIdleConns       int
+	idleConnTimeout    time.Duration
+	timeout            time.Duration
 	// Retry configuration
 	maxRetries         int           // Maximum number of retries, 0 means no retries
 	retryInterval      time.Duration // Base retry interval
@@ -130,9 +130,9 @@ func WithZstdPooling(enable bool) OpFunc {
 // NewClient creates a new http.Client with custom options
 func NewClient(opts ...OpFunc) *http.Client {
 	op := &Option{
-		maxIdleConns:         100,
-		idleConnTimeout:      90 * time.Second,
-		timeout:              30 * time.Second,
+		maxIdleConns:    100,
+		idleConnTimeout: 90 * time.Second,
+		timeout:         30 * time.Second,
 		// Retry defaults
 		maxRetries:         0, // Disable by default for backward compatibility
 		retryInterval:      100 * time.Millisecond,

@@ -71,9 +71,9 @@ func recordSpanError(spanCtx TraceContext, err error) {
 	}
 }
 
-func addSpanEvent(spanCtx TraceContext, name string, attributes ...interface{}) {}
+func addSpanEvent(spanCtx TraceContext, name string, attributes ...any) {}
 
-func setSpanAttribute(spanCtx TraceContext, key string, value interface{}) {
+func setSpanAttribute(spanCtx TraceContext, key string, value any) {
 	if s, ok := spanCtx.(*otelSpan); ok {
 		switch v := value.(type) {
 		case string:

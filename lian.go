@@ -7,9 +7,9 @@ import (
 	"net/url"
 	"time"
 
+	"go.opentelemetry.io/contrib/propagators/b3"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
-	"go.opentelemetry.io/contrib/propagators/b3"
 )
 
 // Global default request instance
@@ -60,72 +60,6 @@ func SetLogger(logger Logger) {
 	}
 }
 
-// SetDefaultHeaderMapping sets the global default header mapping configuration
-// All newly created Request instances will inherit this configuration
-func SetDefaultHeaderMapping(mapping HeaderMapping) {
-	defaultHeaderMapping = mapping
-	defaultRequest.headerMapping = mapping
-}
-
-// SetDefaultAuthHeaderName sets the global default authentication header name
-func SetDefaultAuthHeaderName(headerName string) {
-	defaultHeaderMapping.AuthHeader = headerName
-	defaultRequest.headerMapping.AuthHeader = headerName
-}
-
-// SetDefaultTenantIDHeaderName sets the global default tenant ID header name
-func SetDefaultTenantIDHeaderName(headerName string) {
-	defaultHeaderMapping.TenantIDHeader = headerName
-	defaultRequest.headerMapping.TenantIDHeader = headerName
-}
-
-// SetDefaultUserIDHeaderName sets the global default user ID header name
-func SetDefaultUserIDHeaderName(headerName string) {
-	defaultHeaderMapping.UserIDHeader = headerName
-	defaultRequest.headerMapping.UserIDHeader = headerName
-}
-
-// SetDefaultTargetTenantHeaderName sets the global default target tenant header name
-func SetDefaultTargetTenantHeaderName(headerName string) {
-	defaultHeaderMapping.TargetTenantHeader = headerName
-	defaultRequest.headerMapping.TargetTenantHeader = headerName
-}
-
-// SetDefaultEntryPathHeaderName sets the global default entry path header name
-func SetDefaultEntryPathHeaderName(headerName string) {
-	defaultHeaderMapping.EntryPathHeader = headerName
-	defaultRequest.headerMapping.EntryPathHeader = headerName
-}
-
-// SetDefaultAuthExtractor sets the global default authentication extractor function
-func SetDefaultAuthExtractor(extractor HeaderExtractor) {
-	defaultHeaderMapping.AuthExtractor = extractor
-	defaultRequest.headerMapping.AuthExtractor = extractor
-}
-
-// SetDefaultTenantIDExtractor sets the global default tenant ID extractor function
-func SetDefaultTenantIDExtractor(extractor HeaderExtractor) {
-	defaultHeaderMapping.TenantIDExtractor = extractor
-	defaultRequest.headerMapping.TenantIDExtractor = extractor
-}
-
-// SetDefaultUserIDExtractor sets the global default user ID extractor function
-func SetDefaultUserIDExtractor(extractor HeaderExtractor) {
-	defaultHeaderMapping.UserIDExtractor = extractor
-	defaultRequest.headerMapping.UserIDExtractor = extractor
-}
-
-// SetDefaultTargetTenantExtractor sets the global default target tenant extractor function
-func SetDefaultTargetTenantExtractor(extractor HeaderExtractor) {
-	defaultHeaderMapping.TargetTenantExtractor = extractor
-	defaultRequest.headerMapping.TargetTenantExtractor = extractor
-}
-
-// SetDefaultEntryPathExtractor sets the global default entry path extractor function
-func SetDefaultEntryPathExtractor(extractor HeaderExtractor) {
-	defaultHeaderMapping.EntryPathExtractor = extractor
-	defaultRequest.headerMapping.EntryPathExtractor = extractor
-}
 
 // EnableDumpRequest enables request dumping for all requests
 func EnableDumpRequest() {
@@ -262,7 +196,7 @@ func OptionsWithContext(ctx context.Context, url string) *Response {
 }
 
 // DoWithContext executes a custom request with context
-func DoWithContext(ctx context.Context, method, urlStr string, body interface{}, headers map[string]string) *Response {
+func DoWithContext(ctx context.Context, method, urlStr string, body any, headers map[string]string) *Response {
 	req := NewRequest().SetMethod(method).SetURL(urlStr).SetHeaders(headers)
 
 	if body != nil {
@@ -280,6 +214,6 @@ func DoWithContext(ctx context.Context, method, urlStr string, body interface{},
 }
 
 // Do executes a custom request
-func Do(method, urlStr string, body interface{}, headers map[string]string) *Response {
+func Do(method, urlStr string, body any, headers map[string]string) *Response {
 	return DoWithContext(context.Background(), method, urlStr, body, headers)
 }

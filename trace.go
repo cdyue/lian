@@ -17,7 +17,7 @@ const (
 )
 
 // TraceContext is an abstraction for trace context
-type TraceContext interface{}
+type TraceContext any
 
 // StartSpan starts a new span, returns context and span
 func StartSpan(ctx context.Context, method, host string, isAsync bool) (context.Context, TraceContext) {
@@ -68,7 +68,7 @@ func RecordSpanError(span TraceContext, err error) {
 }
 
 // AddSpanEvent adds event to span
-func AddSpanEvent(span TraceContext, name string, attributes ...interface{}) {
+func AddSpanEvent(span TraceContext, name string, attributes ...any) {
 	if span == nil {
 		return
 	}
@@ -84,7 +84,7 @@ func CreateClientTrace(span TraceContext) *httptrace.ClientTrace {
 }
 
 // SetSpanAttribute sets a custom attribute to span
-func SetSpanAttribute(span TraceContext, key string, value interface{}) {
+func SetSpanAttribute(span TraceContext, key string, value any) {
 	if span == nil {
 		return
 	}

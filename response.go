@@ -15,7 +15,7 @@ import (
 
 // Global zstd decoder pool
 var zstdDecoderPool = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		decoder, _ := zstd.NewReader(nil)
 		return decoder
 	},
@@ -45,9 +45,9 @@ func PutZstdDecoder(decoder *zstd.Decoder) {
 // Response wraps the standard http.Response with additional functionality
 type Response struct {
 	*http.Response
-	body            []byte
-	err             error
-	zstdDictionary  []byte // Zstd dictionary for decompression
+	body           []byte
+	err            error
+	zstdDictionary []byte // Zstd dictionary for decompression
 }
 
 // NewResponse creates a new Response wrapper
@@ -61,9 +61,9 @@ func NewResponse(resp *http.Response, err error) *Response {
 // NewResponseWithZstdDict creates a new Response wrapper with zstd dictionary
 func NewResponseWithZstdDict(resp *http.Response, err error, dict []byte) *Response {
 	return &Response{
-		Response:        resp,
-		err:             err,
-		zstdDictionary:  dict,
+		Response:       resp,
+		err:            err,
+		zstdDictionary: dict,
 	}
 }
 
@@ -158,7 +158,7 @@ func (r *Response) String() (string, error) {
 }
 
 // JSON unmarshals the response body into the provided value
-func (r *Response) JSON(v interface{}) error {
+func (r *Response) JSON(v any) error {
 	bytes, err := r.Bytes()
 	if err != nil {
 		return err
