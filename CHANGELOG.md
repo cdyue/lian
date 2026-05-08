@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.0.8 - 2026-05-08
+
+### Improvements
+- ✨ All debug-level logs (HTTP request/response dump, HTTP trace events) are now emitted at Info level instead of Debug level
+- ✨ The `Debug` method on `slogLogger` now delegates to `slog.Info` internally, ensuring all debug-category logs are visible without requiring debug-level log configuration
+
+### Compatibility
+- 100% backward compatible — no API changes, no breaking changes
+
 ## v0.0.7 - 2026-04-29
 
 ### Breaking Changes

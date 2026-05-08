@@ -88,7 +88,7 @@ func (l *slogLogger) Info(msg string, args ...any) {
 }
 
 func (l *slogLogger) Debug(msg string, args ...any) {
-	l.logger.Debug(msg, args...)
+	l.logger.Info(msg, args...)
 }
 
 func (l *slogLogger) Warn(msg string, args ...any) {
@@ -647,7 +647,7 @@ func (r *Request) sendOnce(ctx context.Context, attempt int) (*Response, error) 
 	if r.dumpRequest {
 		dump, err := httputil.DumpRequestOut(req, true)
 		if err == nil {
-			r.logger.Debug("HTTP Request", "dump", string(dump), "attempt", attempt)
+			r.logger.Info("HTTP Request", "dump", string(dump), "attempt", attempt)
 		} else {
 			r.logger.Warn("Failed to dump request", "error", err, "attempt", attempt)
 		}
@@ -661,17 +661,17 @@ func (r *Request) sendOnce(ctx context.Context, attempt int) (*Response, error) 
 		logger := r.logger
 		consoleTrace := &httptrace.ClientTrace{
 			GetConn: func(hostPort string) {
-				logger.Debug("HTTP Trace: Connecting", "host_port", hostPort, "attempt", attempt)
+				logger.Info("HTTP Trace: Connecting", "host_port", hostPort, "attempt", attempt)
 			},
 			GotConn: func(info httptrace.GotConnInfo) {
-				logger.Debug("HTTP Trace: Connected",
+				logger.Info("HTTP Trace: Connected",
 					"remote_addr", info.Conn.RemoteAddr().String(),
 					"reused", info.Reused,
 					"attempt", attempt,
 				)
 			},
 			DNSStart: func(info httptrace.DNSStartInfo) {
-				logger.Debug("HTTP Trace: Resolving DNS", "host", info.Host, "attempt", attempt)
+				logger.Info("HTTP Trace: Resolving DNS", "host", info.Host, "attempt", attempt)
 			},
 			DNSDone: func(info httptrace.DNSDoneInfo) {
 				if info.Err != nil {
@@ -681,27 +681,27 @@ func (r *Request) sendOnce(ctx context.Context, attempt int) (*Response, error) 
 					for i, addr := range info.Addrs {
 						addrs[i] = addr.String()
 					}
-					logger.Debug("HTTP Trace: DNS resolved", "addresses", addrs, "attempt", attempt)
+					logger.Info("HTTP Trace: DNS resolved", "addresses", addrs, "attempt", attempt)
 				}
 			},
 			ConnectStart: func(network, addr string) {
-				logger.Debug("HTTP Trace: Dialing", "network", network, "address", addr, "attempt", attempt)
+				logger.Info("HTTP Trace: Dialing", "network", network, "address", addr, "attempt", attempt)
 			},
 			ConnectDone: func(network, addr string, err error) {
 				if err != nil {
 					logger.Warn("HTTP Trace: Dial failed", "error", err, "attempt", attempt)
 				} else {
-					logger.Debug("HTTP Trace: Connected", "network", network, "address", addr, "attempt", attempt)
+					logger.Info("HTTP Trace: Connected", "network", network, "address", addr, "attempt", attempt)
 				}
 			},
 			TLSHandshakeStart: func() {
-				logger.Debug("HTTP Trace: Starting TLS handshake", "attempt", attempt)
+				logger.Info("HTTP Trace: Starting TLS handshake", "attempt", attempt)
 			},
 			TLSHandshakeDone: func(state tls.ConnectionState, err error) {
 				if err != nil {
 					logger.Warn("HTTP Trace: TLS handshake failed", "error", err, "attempt", attempt)
 				} else {
-					logger.Debug("HTTP Trace: TLS handshake completed",
+					logger.Info("HTTP Trace: TLS handshake completed",
 						"tls_version", fmt.Sprintf("%x", state.Version),
 						"cipher_suite", tls.CipherSuiteName(state.CipherSuite),
 						"attempt", attempt,
@@ -709,17 +709,17 @@ func (r *Request) sendOnce(ctx context.Context, attempt int) (*Response, error) 
 				}
 			},
 			WroteHeaders: func() {
-				logger.Debug("HTTP Trace: Wrote request headers", "attempt", attempt)
+				logger.Info("HTTP Trace: Wrote request headers", "attempt", attempt)
 			},
 			WroteRequest: func(info httptrace.WroteRequestInfo) {
 				if info.Err != nil {
 					logger.Warn("HTTP Trace: Failed to write request", "error", info.Err, "attempt", attempt)
 				} else {
-					logger.Debug("HTTP Trace: Wrote full request", "attempt", attempt)
+					logger.Info("HTTP Trace: Wrote full request", "attempt", attempt)
 				}
 			},
 			GotFirstResponseByte: func() {
-				logger.Debug("HTTP Trace: Received first response byte", "attempt", attempt)
+				logger.Info("HTTP Trace: Received first response byte", "attempt", attempt)
 			},
 		}
 
@@ -747,7 +747,7 @@ func (r *Request) sendOnce(ctx context.Context, attempt int) (*Response, error) 
 	if r.dumpResponse {
 		dump, err := httputil.DumpResponse(resp, true)
 		if err == nil {
-			r.logger.Debug("HTTP Response", "dump", string(dump), "attempt", attempt)
+			r.logger.Info("HTTP Response", "dump", string(dump), "attempt", attempt)
 		} else {
 			r.logger.Warn("Failed to dump response", "error", err, "attempt", attempt)
 		}
