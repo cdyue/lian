@@ -10,13 +10,14 @@ import (
 	"io"
 	"log/slog"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httptrace"
 	"net/http/httputil"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -44,7 +45,6 @@ type Request struct {
 	body        BodyProvider
 	cookies     []*http.Cookie
 	logger      Logger // Logger instance
-
 
 	// Configuration flags
 	timeout                 time.Duration
@@ -138,11 +138,11 @@ type RequestOption func(*Request)
 // NewRequest creates a new Request instance with default configuration
 func NewRequest(opts ...RequestOption) *Request {
 	r := &Request{
-		client:        defaultClient,
-		header:        make(http.Header),
-		queryParams:   make(url.Values),
-		cookies:       make([]*http.Cookie, 0),
-		logger:        defaultLogger,
+		client:      defaultClient,
+		header:      make(http.Header),
+		queryParams: make(url.Values),
+		cookies:     make([]*http.Cookie, 0),
+		logger:      defaultLogger,
 		// Retry defaults (same as client defaults
 		maxRetries:         0, // Disable by default for backward compatibility
 		retryInterval:      100 * time.Millisecond,
@@ -182,8 +182,6 @@ func WithCompositeTracePropagation() RequestOption {
 		r.EnableCompositeTracePropagation()
 	}
 }
-
-
 
 // SetClient sets a custom http.Client
 func (r *Request) SetClient(client *http.Client) *Request {
@@ -289,7 +287,6 @@ func (r *Request) SetBearerToken(token string) *Request {
 	return r
 }
 
-
 // Standard context key definition
 type contextKey string
 
@@ -318,8 +315,6 @@ func (r *Request) SetUserAgent(ua string) *Request {
 	r.header.Set("User-Agent", ua)
 	return r
 }
-
-
 
 // SetContentType sets the Content-Type header
 func (r *Request) SetContentType(ct string) *Request {
@@ -766,11 +761,8 @@ func (r *Request) sendOnce(ctx context.Context, attempt int) (*Response, error) 
 			// Check if it's a custom error status code
 			isError := false
 			if len(r.errorStatusCodes) > 0 {
-				for _, code := range r.errorStatusCodes {
-					if resp.StatusCode == code {
-						isError = true
-						break
-					}
+				if slices.Contains(r.errorStatusCodes, resp.StatusCode) {
+					isError = true
 				}
 			} else if resp.StatusCode >= 400 {
 				isError = true
@@ -1019,7 +1011,7 @@ func mergeClientTraces(traces ...*httptrace.ClientTrace) *httptrace.ClientTrace 
 
 // isPointer checks if a value is a pointer
 func isPointer(v any) bool {
-	return reflect.ValueOf(v).Kind() == reflect.Ptr
+	return reflect.ValueOf(v).Kind() == reflect.Pointer
 }
 
 // isRetryableError checks if an error should trigger a retry
@@ -1042,12 +1034,7 @@ func isRetryableError(err error) bool {
 
 // isRetryableStatusCode checks if a status code should trigger a retry
 func isRetryableStatusCode(code int, retryableStatuses []int) bool {
-	for _, s := range retryableStatuses {
-		if code == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(retryableStatuses, code)
 }
 
 // calculateBackoff calculates the backoff duration with jitter
